@@ -43,9 +43,24 @@ python -m fpspl --method dynamic `
 
 训练和排序不读取真假通过研究标签。若另有标签，请在排序完成后另行评估；按缺陷版本划分，分别报告原本通过和由失败配置转换的样本，并与特征集合、PULP、CLAP 比较。当前仓库的旧切片原型仍可通过 `--method legacy-slice` 重现，但**不参与上述动态方法**。
 
+```powershell
+python -m fpspl.evaluation `
+  --ranking E:\Myself\投稿\work7\FP-SPL\outputs\dynamic-bankaccount\ranking.csv `
+  --labels-root E:\Myself\投稿\work7\pulp_trial\dataset
+python -m fpspl.diagnostics `
+  --graphs-root E:\Myself\投稿\work7\FP-SPL\outputs\dynamic-bankaccount `
+  --labels-root E:\Myself\投稿\work7\pulp_trial\dataset
+```
+
+### 已完成的试跑
+
+- `_MultipleBugs_.NOB_1.ID_98`：34 个配置、37 条失败测试、207 条通过测试；12 个原本通过的配置全部获得排序，重放／构图错误为 0。该版本没有可用的真假通过研究标签。
+- `_MultipleBugs_.NOB_1.ID_194`：34 个配置、17 条失败测试、386 条通过测试；22 个原本通过的配置全部获得排序，重放／构图错误为 0。使用**排序后才读取**的研究标签评估，4 个假通过排在前 4 位，平均精度为 1.0。但只比较特征集合或条件分支也能达到 1.0，因此这一次试跑**没有证明动态图提高了识别能力**。
+
 ## 适用边界
 
 - BRFL 的因子边是当前单条测试执行时的定义／使用和条件前驱关系。重复执行会在用于学习的行级图中合并，原始事件顺序保留在 `graph.tsv`。
 - 如果测试重编译或插桩改变了测试结果，该测试被记录为错误并排除，不会用覆盖文件的预期结果冒充实际运行结果。
 - 当故障位于所有配置共有的基础特征，且缺少能区分真实行为的测试或状态干预时，配置之间仍可能不可识别。此方法保留基础特征的证据，但不能保证识别所有这类故障。
 - 输出目录可能很大，默认被版本控制忽略。源代码与实验配置应在独立分支提交。
+- 当前评估只覆盖原本通过的配置；由失败配置删去失败测试而转换的假通过样本，需要单独构造并重放其保留测试，不能直接把原失败轨迹当成通过证据。
