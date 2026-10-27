@@ -16,7 +16,7 @@ from fpspl.evaluation import average_precision
 
 
 def _items(graph: dict, field: str) -> set:
-    return {tuple(value) if isinstance(value, list) else value for value in graph[field]}
+    return {tuple(value) if isinstance(value, list) else value for value in graph.get(field, [])}
 
 
 def _f1(a: set, b: set) -> float:
@@ -24,7 +24,7 @@ def _f1(a: set, b: set) -> float:
 
 
 def compare_components(graphs_root: Path, labels_root: Path) -> dict:
-    modes = ("features", "nodes", "links", "branches")
+    modes = ("features", "nodes", "links", "typed_links", "branches")
     aps = {mode: [] for mode in modes}
     prevalences = []
     for version_dir in sorted(graphs_root.iterdir()):

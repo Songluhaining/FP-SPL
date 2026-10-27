@@ -7,6 +7,7 @@ name = "fp-spl"
 version = "0.1.0"
 description = "Failure-template ranking for false-passing SPL products"
 requires-python = ">=3.10"
+dependencies = ["numpy>=1.23", "scikit-learn>=1.2"]
 
 [project.scripts]
 fp-spl = "fpspl.cli:main"

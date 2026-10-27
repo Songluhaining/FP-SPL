@@ -1,63 +1,51 @@
-# FP-SPL：软件产品线假通过配置的局部图排序原型
+# FP-SPL：基于逐测试动态依赖图的假通过配置排序
 
-本仓库建立一个可复现的第一阶段：从**现有测试未通过的配置**提取逐测试故障行为模板，再将**现有测试通过的配置**按其执行证据与模板的关系排序。排序只使用测试结果和运行证据，不读取真通过／假通过的实验标签。
+当前主流程直接使用 BRFL 的字节码插桩和运行因子图，不读取 PULP 的切片日志。输入中的 `__FAILED__` 只作为已知故障行为样本，`__PASSED__` 只作为无标签候选；真假通过研究标签不进入训练。
 
-## 当前输入及证据含义
+## 实现流程
 
-- `config.report.csv.done` 中的 `__TEST_OUTPUT__` 只用于分出已知失败配置和待排序的通过配置。
-- `coverage/failed/*.coverage.xml` 和 `coverage/passed/*.coverage.xml` 是逐测试执行覆盖；条件行中的 `truecount`、`falsecount` 提供已走过的分支。
-- `spectrum_*_coverage.xml` 中的 `featureClass`、`featureLineNum` 把生成程序中的行映射回原始特征，沿用 BRFL 的特征位置映射思路。基础特征也作为普通特征保留。
-- `slice.all_statements.backward_slicing.log` 提供语句的**传递性后向切片集合**。只有两个语句都在某条测试中执行过时才保留其可达关系。它不是 BRFL 的逐事件直接动态依赖边，也没有执行顺序和运行值；结果文件明确标为 `coverage+slice-reachability`。
-- 测试源码中的断言记录预期表达式和测试可观察点；覆盖数据并不包含失败时的实际运行值。因此模板中的 `observations` **不是实测输出值**。
+1. 从本地 BRFL 源码编译插桩代理和图构建库；不修改 BRFL 仓库。
+2. 将每个配置的产品源码与测试源码以 `javac -g` 重新编译到输出目录，保留字节码到源码的行号映射。原始数据集保持只读。
+3. 对每条测试分别启动 Java 虚拟机，使用 BRFL 代理记录 `opcode` 轨迹与 `.source.log`；核对实际测试结果与覆盖报告。
+4. 使用 BRFL 的 `ByteCodeGraph` 对单条测试的源码日志和运行日志构图。导出每个运行因子的定义、使用与条件前驱，形成有方向且标注 `DATA`／`CONTROL` 的直接依赖边；保留事件数量和运行值。
+5. 按覆盖文件中的 `featureClass`、`featureLineNum` 把源码位置映射至特征来源。以测试断言为可观察点，对依赖图取后向闭包，得到失败测试的局部行为模板和通过测试的局部图。基础特征也正常保留。
+6. 将执行节点、带类型的依赖边、条件结果、源码词项和数值类别编码为图特征。用失败测试作正样本、通过测试作可能混有假通过的无标签背景，训练 8 个重复抽样的加权逻辑回归模型。候选测试优先由未把它抽入无标签背景的模型评分，再结合最相近失败模板的图相似度，按配置内最高测试分数排序。
 
-本仓库不复制 BRFL 代码，也不改动其仓库。当前原始 BankAccountTP 数据没有 BRFL 逐测试轨迹，故这个可运行原型使用此前 PULP 试跑生成的语句切片。接入 BRFL 逐事件图后，应保留边的类型、方向、运行值与测试身份，再替换这里的切片可达关系。
+此分数是**疑似假通过排序分数**，并非校准概率或最终真假判定。模型目前是可复现的弱监督图特征模型，尚未包含代码语义大模型或因果干预。
 
-## 运行
+## 运行条件
 
-需要 Python 3.10 或更新版本；当前实现只使用标准库。以下命令在已有的 BankAccountTP 原始数据和 PULP 试跑切片上运行一个缺陷版本：
+- Python 3.10 及以上，安装 `numpy`、`scikit-learn`。
+- Java 8 开发工具包。使用 BRFL 现有依赖包目录和本地源码。
+- BankAccountTP 原始数据集有 `src/`、`test/`、逐测试覆盖及 `config.report.csv.done`。
 
 ```powershell
 cd E:\Myself\投稿\work7\FP-SPL
-python -m fpspl `
+python -m fpspl --method dynamic `
   --dataset D:\dataset\whn\4wise-BankAccountTP-1BUG-Full `
-  --slice-dataset E:\Myself\投稿\work7\pulp_trial\dataset `
-  --output E:\Myself\投稿\work7\FP-SPL\outputs\bankaccount `
+  --brfl-root E:\Myself\投稿\work5\code\BRFL `
+  --java-home 'E:\Program Files\Java\jdk-1.8' `
+  --output E:\Myself\投稿\work7\FP-SPL\outputs\dynamic-bankaccount `
   --version _MultipleBugs_.NOB_1.ID_98
 ```
 
-移除 `--version` 即运行数据集中的全部缺陷版本。若缺少切片，程序默认报错；只有显式传入 `--allow-coverage-only` 才会退化为仅覆盖排序，且其结果没有依赖关系证据。
+去掉 `--version` 会依次处理全部缺陷版本。初次检查可用 `--limit-failed-variants 2 --limit-passing-variants 2 --max-tests-per-variant 2`；这些限制会改变训练样本和排序范围，不能当作完整实验结果。
 
-## 输出
+## 输出与核查
 
-- `ranking.csv`：每个缺陷版本内，对测试通过的配置排序。`score` 是图相似和失败样本富集形成的**排序分数**，不是已校准的假通过概率，也不是最终真假标签。
-- `<版本>/failure_templates.json`：每条可用失败测试的语句、切片可达关系、执行分支、特征来源、源码和断言。
-- `<版本>/test_graphs.jsonl.gz`：逐测试局部执行图，包括用于构建模板的失败测试以及用于排序的通过测试。
-- `<版本>/summary.json`：样本数、图证据等级和缺失数据。
+- `<版本>/instrumented/<配置>/build/`：在工作区重编译的字节码。
+- `<版本>/instrumented/<配置>/tests/<测试>/`：单条测试的代理轨迹、构图结果 `graph.tsv` 和实际结果 `status.json`。
+- `<版本>/test_graphs.jsonl.gz`：逐测试的局部动态图；`typed_links` 是带方向和类型的直接运行依赖边。
+- `<版本>/failure_templates.json`：失败测试的局部故障行为模板。
+- `<版本>/pu_model.pkl`：已训练模型，只应从可信的本地输出加载。
+- `<版本>/ranking.csv`：原本通过的配置及证据排序。
+- `<版本>/summary.json`：图数量、是否完成训练、未能重放或解析的测试。
 
-训练权重来自失败测试图与无标签通过测试图的**出现频率对比**。通过测试只是背景分布，未被赋予“真通过”负标签。每个通过配置取其测试图与故障模板之间的最佳匹配；缺少图或缺少模板时，标记为 `insufficient_evidence`。此阶段是透明的弱监督排序器，**尚不是深度模型或完整的因果识别方法**。
+训练和排序不读取真假通过研究标签。若另有标签，请在排序完成后另行评估；按缺陷版本划分，分别报告原本通过和由失败配置转换的样本，并与特征集合、PULP、CLAP 比较。当前仓库的旧切片原型仍可通过 `--method legacy-slice` 重现，但**不参与上述动态方法**。
 
-若有单独的研究标签，可在**排序完成后**运行评估程序。它只对原本就通过的配置计算排序指标，不将标签送回排序器：
+## 适用边界
 
-```powershell
-python -m fpspl.evaluation `
-  --ranking E:\Myself\投稿\work7\FP-SPL\outputs\bankaccount\ranking.csv `
-  --labels-root E:\Myself\投稿\work7\pulp_trial\dataset `
-  --output E:\Myself\投稿\work7\FP-SPL\outputs\bankaccount\evaluation.json
-```
-
-可用 `python -m fpspl.diagnostics --graphs-root <输出目录> --labels-root <标签数据目录>` 检查“只比特征集合”这一简单方法是否已经足够。诊断程序与正式排序程序分离。
-
-## 实验边界
-
-1. 当前图可以提供结构相似性证据，不能单凭切片证明因果关系或判断代码行为正确性。
-2. 当基础特征中的缺陷存在于所有配置，或缺陷路径没有被任何通过测试执行，配置对比可能缺乏可识别信号；需要后续的测试输入或状态干预。
-3. 原始失败配置转成假通过配置时，必须隐藏被移除的失败测试及其轨迹。程序仅对报告中通过的配置读取 `coverage/passed`，不会把其 `coverage/failed` 纳入排序输入。
-4. 如果使用实验标签评估，应按缺陷版本划分数据，并分开报告原本通过和转换而来的假通过配置；不要用同一批样本的真假标签调整排序权重或阈值。
-
-### BankAccountTP 初步诊断（2026-10-27）
-
-73 个缺陷版本中，72 个产生了模板；1666 个原本通过的配置获得排序，1 个版本因模板不足没有排序。在有研究标签且同时含真假通过配置的 38 个版本上，本排序器的平均排序精度约为 **0.973**；但**仅比较特征集合**的简单方法达到 **1.000**。这说明当前数据及标签划分并不能证明依赖关系带来了增益，甚至这一初版组合分数略低于简单特征匹配。当前结果只用来检查管线和暴露评估问题，不能作为优于 PULP 或 CLAP 的论文结论。基础特征缺陷版本缺少相应研究标签，也未纳入该数字。
-
-## 版本控制
-
-远程仓库为 `https://github.com/Songluhaining/FP-SPL.git`。`outputs/` 和 `data/` 被忽略，以免提交大体量数据及生成结果。后续大规模改动应在独立分支实施、运行验证并提交，再合并到主分支。
+- BRFL 的因子边是当前单条测试执行时的定义／使用和条件前驱关系。重复执行会在用于学习的行级图中合并，原始事件顺序保留在 `graph.tsv`。
+- 如果测试重编译或插桩改变了测试结果，该测试被记录为错误并排除，不会用覆盖文件的预期结果冒充实际运行结果。
+- 当故障位于所有配置共有的基础特征，且缺少能区分真实行为的测试或状态干预时，配置之间仍可能不可识别。此方法保留基础特征的证据，但不能保证识别所有这类故障。
+- 输出目录可能很大，默认被版本控制忽略。源代码与实验配置应在独立分支提交。

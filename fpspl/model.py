@@ -24,7 +24,11 @@ class TestGraph:
     outcome: str
     nodes: set[str] = field(default_factory=set)
     links: set[tuple[str, str]] = field(default_factory=set)
+    typed_links: set[tuple[str, str, str]] = field(default_factory=set)
     branches: set[str] = field(default_factory=set)
+    event_count: int = 0
+    runtime_values: dict[str, list[str]] = field(default_factory=dict)
+    observed_result: dict[str, Any] = field(default_factory=dict)
     observations: tuple[str, ...] = ()
     node_info: dict[str, NodeInfo] = field(default_factory=dict)
     evidence: str = "coverage+slice-reachability"
@@ -37,6 +41,7 @@ class TestGraph:
         result = asdict(self)
         result["nodes"] = sorted(self.nodes)
         result["links"] = [list(link) for link in sorted(self.links)]
+        result["typed_links"] = [list(link) for link in sorted(self.typed_links)]
         result["branches"] = sorted(self.branches)
         result["features"] = sorted(self.features)
         return result
