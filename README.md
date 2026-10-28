@@ -86,3 +86,22 @@ python -m cfp_spl ... `
 - 基础特征中的缺陷不会被跳过。只要反事实测试能激活相关语句并产生可观察差异，它与可选特征中的缺陷使用相同流程。
 
 `vendor/brfl/`保存了从原BRFL仓库移植的重编译、插桩和因子图实现；运行不会修改原BRFL仓库或原始数据集。
+
+## 完整数据集评价
+
+可将73个缺陷版本拆成多个互不重叠的运行分片：
+
+```powershell
+python -m cfp_spl.batch --dataset <数据集> --output <结果目录> `
+  --java-home <Java8目录> --shards 4 --index 0
+```
+
+分别将`--index`设为0、1、2、3并行运行。完成后执行：
+
+```powershell
+python -m cfp_spl.evaluation --results <结果目录> --labels <标签目录>
+python -m cfp_spl.diagnostics --results <结果目录> --labels <标签目录>
+python -m cfp_spl.ablation --results <结果目录> --labels <标签目录>
+```
+
+评价程序只在全部排序完成后读取真假通过标签。完整BankAccountTP实验结果和限制见[实验报告](docs/experiment-bankaccount-all73.md)。

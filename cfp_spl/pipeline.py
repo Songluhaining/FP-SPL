@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import traceback
 from dataclasses import asdict
@@ -97,6 +98,7 @@ class CounterfactualPipeline:
 
         assessments, errors = [], []
         build_cache = {}
+        execution_cache = {}
 
         def build(config: Configuration):
             if config.name not in build_cache:
@@ -104,6 +106,13 @@ class CounterfactualPipeline:
                     config, out / "configurations" / config.name
                 )
             return build_cache[config.name]
+
+        def execute(config: Configuration, test: JavaTestCase, work: Path, compiled):
+            source_digest = hashlib.sha1(test.full_source.encode("utf-8")).hexdigest()
+            key = (config.name, test.identity, source_digest, str(work))
+            if key not in execution_cache:
+                execution_cache[key] = self.runtime.execute(config, test, work, compiled)
+            return execution_cache[key]
 
         for config_a, config_b, pair, row in jobs:
             try:
@@ -129,10 +138,10 @@ class CounterfactualPipeline:
                         work_a = out / "configurations" / config_a.name
                         build_b, build_a = build(config_b), build(config_a)
                         failing_test = pair.failing
-                    execution_b = self.runtime.execute(config_b, failing_test, work_b, build_b)
+                    execution_b = execute(config_b, failing_test, work_b, build_b)
                     if execution_b.outcome != "failed":
                         raise RuntimeError("反事实测试没有在未通过配置B上复现失败")
-                    execution_a = self.runtime.execute(config_a, pair.passing, work_a, build_a)
+                    execution_a = execute(config_a, pair.passing, work_a, build_a)
                     assessment = assess_pair(
                         config_a.name, config_b.name, pair,
                         load_factor_graph(execution_b.graph_path),
