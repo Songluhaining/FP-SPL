@@ -69,9 +69,6 @@ def main() -> None:
         if not base_is_buggy_features(["BankAccount", "Base", "ExamDB", "Compress"], buggy_features):
             continue
         label_file = version / "variant_labels.csv"
-        if label_file.exists():
-            statuses[version.name] = "already_labeled"
-            continue
         buggy_statements = get_multiple_buggy_statements(version.name, str(version))
         candidates = originally_passing(Path(get_model_configs_report_path(str(version))))
         covered = passing_product_has_buggy_statements(str(version), candidates, buggy_statements)

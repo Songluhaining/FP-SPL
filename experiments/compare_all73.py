@@ -5,10 +5,12 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import random
 from collections import defaultdict
 from pathlib import Path
 
-from sklearn.metrics import average_precision_score, precision_recall_fscore_support, accuracy_score
+from sklearn.metrics import (average_precision_score, precision_recall_fscore_support,
+                             accuracy_score, roc_auc_score, roc_curve)
 
 
 def _read(path: Path) -> list[dict[str, str]]:
@@ -77,16 +79,48 @@ def compare(dataset: Path, pulp_predictions: Path, graph_ranking: Path,
 
     def group_summary(group: str) -> dict:
         entries = [row for row in per_version if row["group"] == group]
+        subjects = [row for row in combined if row["group"] == group]
         mixed = [row for row in entries if row["FP"] > 0 and row["TP"] > 0]
         def mean(field: str, items: list[dict]):
             values = [row[field] for row in items if row[field] is not None]
             return sum(values) / len(values) if values else None
+        differences = [row["graph_average_precision"] - row["pulp_average_precision"]
+                       for row in mixed]
+        if differences:
+            rng = random.Random(17)
+            draws = sorted(sum(rng.choices(differences, k=len(differences))) / len(differences)
+                           for _ in range(5000))
+            interval = [draws[124], draws[4874]]
+        else:
+            interval = None
+        true_positive = sum(row["label"] == "FP" and row["pulp_prediction"] == "FP"
+                            for row in subjects)
+        false_positive = sum(row["label"] == "TP" and row["pulp_prediction"] == "FP"
+                             for row in subjects)
+        false_negative = sum(row["label"] == "FP" and row["pulp_prediction"] == "TP"
+                             for row in subjects)
         return {"versions": len(entries), "mixed_label_versions": len(mixed),
+                "all_FP_versions": sum(row["FP"] == row["variants"] for row in entries),
+                "all_TP_versions": sum(row["TP"] == row["variants"] for row in entries),
+                "graph_model_trained_versions": sum(row["graph_model_trained"] for row in entries),
                 "variants": sum(row["variants"] for row in entries),
                 "FP": sum(row["FP"] for row in entries),
                 "TP": sum(row["TP"] for row in entries),
+                "pulp_binary_FP_detected": true_positive,
+                "pulp_binary_FP_precision": true_positive / (true_positive + false_positive)
+                if true_positive + false_positive else None,
+                "pulp_binary_FP_recall": true_positive / (true_positive + false_negative)
+                if true_positive + false_negative else None,
+                "pulp_macro_precision_at_5_all": mean("pulp_precision_at_5", entries),
+                "graph_macro_precision_at_5_all": mean("graph_precision_at_5", entries),
                 "pulp_macro_AP_mixed": mean("pulp_average_precision", mixed),
                 "graph_macro_AP_mixed": mean("graph_average_precision", mixed),
+                "graph_minus_pulp_macro_AP_mixed": sum(differences) / len(differences)
+                if differences else None,
+                "paired_bootstrap_95pct_interval": interval,
+                "graph_AP_wins_ties_losses": [sum(value > 1e-12 for value in differences),
+                                              sum(abs(value) <= 1e-12 for value in differences),
+                                              sum(value < -1e-12 for value in differences)],
                 "pulp_macro_precision_at_5_mixed": mean("pulp_precision_at_5", mixed),
                 "graph_macro_precision_at_5_mixed": mean("graph_precision_at_5", mixed)}
 
@@ -95,6 +129,18 @@ def compare(dataset: Path, pulp_predictions: Path, graph_ranking: Path,
     missing = sorted((original & pulp.keys()) - graph.keys())
     precision, recall, f1, _ = precision_recall_fscore_support(
         true, pulp_binary, average="binary", zero_division=0) if combined else (None, None, None, None)
+    cross_version = [row for row in combined if row["label"] == "TP"
+                     or (row["group"] == "base_feature" and row["label"] == "FP")]
+    cross_labels = [int(row["label"] == "FP") for row in cross_version]
+    cross_metrics = {}
+    if set(cross_labels) == {0, 1}:
+        for method in ("pulp", "graph"):
+            scores = [row[method + "_score"] for row in cross_version]
+            fpr, tpr, _ = roc_curve(cross_labels, scores)
+            cross_metrics[method] = {"ROC_AUC": float(roc_auc_score(cross_labels, scores)),
+                                     "recall_at_FPR_at_most_10pct": float(max(
+                                         recall for false_positive_rate, recall in zip(fpr, tpr)
+                                         if false_positive_rate <= 0.10))}
     result = {"dataset_versions": len([p for p in dataset.iterdir() if p.is_dir()]),
               "originally_passing_expected": len(original),
               "pulp_originally_passing": len(original & pulp.keys()),
@@ -106,6 +152,7 @@ def compare(dataset: Path, pulp_predictions: Path, graph_ranking: Path,
               "other_feature": group_summary("other_feature"),
               "pulp_binary_on_matched": {"accuracy": accuracy_score(true, pulp_binary) if combined else None,
                                           "FP_precision": precision, "FP_recall": recall, "FP_F1": f1},
+              "base_FP_vs_other_versions_TP_exploratory": cross_metrics,
               "comparison_scope": "Originally passing variants matched by version and variant; base-feature versions have no TP under PULP labeling, so ranking AP is not discriminative there."}
     output.mkdir(parents=True, exist_ok=True)
     if missing:
