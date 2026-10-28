@@ -4,16 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fp-spl"
-version = "0.1.0"
-description = "Failure-template ranking for false-passing SPL products"
+version = "0.2.0"
+description = "Counterfactual causal identification of false-passing SPL configurations"
 requires-python = ">=3.10"
-dependencies = ["numpy>=1.23", "scikit-learn>=1.2"]
-
-[project.optional-dependencies]
-graph = ["torch>=2.0"]
+dependencies = []
 
 [project.scripts]
-fp-spl = "fpspl.cli:main"
+fp-spl = "cfp_spl.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["fpspl*"]
+include = ["cfp_spl*"]
