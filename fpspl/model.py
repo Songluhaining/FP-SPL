@@ -46,6 +46,22 @@ class TestGraph:
         result["features"] = sorted(self.features)
         return result
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TestGraph":
+        """Restore a cached runtime graph for model experiments without re-instrumenting."""
+        return cls(
+            version=data["version"], variant=data["variant"], test=data["test"],
+            outcome=data["outcome"], nodes=set(data["nodes"]),
+            links={tuple(edge) for edge in data.get("links", [])},
+            typed_links={tuple(edge) for edge in data.get("typed_links", [])},
+            branches=set(data.get("branches", [])), event_count=data.get("event_count", 0),
+            runtime_values=data.get("runtime_values", {}),
+            observed_result=data.get("observed_result", {}),
+            observations=tuple(data.get("observations", [])),
+            node_info={name: NodeInfo(**details) for name, details in data.get("node_info", {}).items()},
+            evidence=data.get("evidence", ""),
+        )
+
 
 @dataclass
 class FailureTemplate:

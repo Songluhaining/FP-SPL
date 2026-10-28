@@ -17,7 +17,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dataset", type=Path, required=True, help="Root containing buggy-version directories")
     parser.add_argument("--output", type=Path, required=True, help="Output directory for graphs, templates and ranking")
     parser.add_argument("--method", choices=("dynamic", "legacy-slice"), default="dynamic")
-    parser.add_argument("--brfl-root", type=Path, help="BRFL source tree, required for dynamic mode")
+    parser.add_argument("--model", choices=("graph", "linear"), default="graph",
+                        help="Graph neural model or original linear graph-feature baseline")
     parser.add_argument("--java-home", type=Path, help="Java 8 JDK home, defaults to JAVA_HOME")
     parser.add_argument("--limit-failed-variants", type=int)
     parser.add_argument("--limit-passing-variants", type=int)
@@ -29,10 +30,10 @@ def main(argv: list[str] | None = None) -> int:
         help="Allow missing slices; the result then has no dependency links",
     )
     args = parser.parse_args(argv)
+    args.output = args.output.resolve()
+    args.dataset = args.dataset.resolve()
     if args.method == "dynamic":
-        if args.brfl_root is None:
-            parser.error("--brfl-root is required for dynamic mode")
-        runtime = BrflRuntime(args.brfl_root, args.output / "runtime", args.java_home)
+        runtime = BrflRuntime(args.output / "runtime", args.java_home)
         runtime.build()
         version_dirs = sorted(path for path in args.dataset.iterdir()
                               if path.is_dir() and (path / "config.report.csv.done").is_file())
@@ -49,6 +50,7 @@ def main(argv: list[str] | None = None) -> int:
                 max_tests=args.max_tests_per_variant,
                 limit_failed_variants=args.limit_failed_variants,
                 limit_passing_variants=args.limit_passing_variants,
+                model_kind=args.model,
             )
             summaries.append(summary)
             with (args.output / version_dir.name / "ranking.csv").open(encoding="utf-8-sig", newline="") as handle:

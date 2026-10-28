@@ -1,7 +1,7 @@
-"""Run BRFL's Java instrumenter and export per-test runtime dependency factors.
+"""Run the vendored BRFL Java instrumenter and export runtime dependency factors.
 
 All generated classes and traces live below the caller's output directory. The
-original dataset and BRFL source tree are read-only inputs.
+original dataset is a read-only input. The BRFL sources live in this repository.
 """
 
 from __future__ import annotations
@@ -11,9 +11,10 @@ import re
 import subprocess
 from pathlib import Path
 
+from fpspl.recompile import recompile_variant
+
 
 TRACE_LINE = ("opcode", "###")
-JAVA_SOURCE = re.compile(r"\bpackage\s+([\w.]+)\s*;")
 ASSERT_FAILURE = re.compile(r"expected:<(.+?)> but was:<(.+?)>")
 
 
@@ -28,8 +29,8 @@ def _run(command: list[str], cwd: Path, log: Path, timeout: int = 180) -> int:
 
 
 class BrflRuntime:
-    def __init__(self, brfl_root: Path, work_root: Path, java_home: Path | None = None):
-        self.brfl_root = brfl_root.resolve()
+    def __init__(self, work_root: Path, java_home: Path | None = None):
+        self.brfl_root = Path(__file__).resolve().parent.parent / "vendor" / "brfl"
         self.work_root = work_root.resolve()
         java_home = java_home or Path(os.environ.get("JAVA_HOME", ""))
         if not java_home.is_dir():
@@ -41,7 +42,8 @@ class BrflRuntime:
         self.classes = self.work_root / "brfl-classes"
         self.agent = self.work_root / "brfl-agent.jar"
         self.bridge = Path(__file__).resolve().parent.parent / "java" / "ppfl" / "FpsplTraceExport.java"
-        for path in (self.java, self.javac, self.jar, self.bridge, self.lib):
+        for path in (self.java, self.javac, self.jar, self.bridge, self.lib,
+                     self.brfl_root / "src" / "main" / "java"):
             if not path.exists():
                 raise FileNotFoundError(path)
 
@@ -74,31 +76,7 @@ class BrflRuntime:
             raise RuntimeError(f"BRFL agent packaging failed: {log}")
 
     def recompile_variant(self, variant_dir: Path, variant_work: Path) -> tuple[Path, Path, list[str]]:
-        main_out, test_out = variant_work / "build" / "main", variant_work / "build" / "test"
-        main_sources = sorted((variant_dir / "src").rglob("*.java"))
-        test_sources = sorted((variant_dir / "test").rglob("*.java"))
-        if not main_sources or not test_sources:
-            raise FileNotFoundError(f"Java source/test files missing: {variant_dir}")
-        main_out.mkdir(parents=True, exist_ok=True)
-        test_out.mkdir(parents=True, exist_ok=True)
-        compile_log = variant_work / "compile.log"
-        if not any(main_out.rglob("*.class")):
-            command = [str(self.javac), "-g", "-encoding", "UTF-8", "-cp", str(self.lib / "*"),
-                       "-d", str(main_out), *(str(path) for path in main_sources)]
-            if _run(command, variant_work, compile_log):
-                raise RuntimeError(f"Production source recompilation failed: {compile_log}")
-        if not any(test_out.rglob("*.class")):
-            cp = os.pathsep.join((str(main_out), str(self.lib / "*")))
-            command = [str(self.javac), "-g", "-encoding", "UTF-8", "-cp", cp,
-                       "-d", str(test_out), *(str(path) for path in test_sources)]
-            if _run(command, variant_work, compile_log):
-                raise RuntimeError(f"Test recompilation failed: {compile_log}")
-        classes = []
-        for path in main_sources:
-            source = path.read_text(encoding="utf-8", errors="replace")
-            package = JAVA_SOURCE.search(source)
-            classes.append((package.group(1) + "." if package else "") + path.stem)
-        return main_out, test_out, classes
+        return recompile_variant(variant_dir, variant_work, self.javac, self.lib, _run)
 
     def trace_test(
         self, variant_dir: Path, variant_work: Path, coverage_file: Path,

@@ -9,6 +9,9 @@ description = "Failure-template ranking for false-passing SPL products"
 requires-python = ">=3.10"
 dependencies = ["numpy>=1.23", "scikit-learn>=1.2"]
 
+[project.optional-dependencies]
+graph = ["torch>=2.0"]
+
 [project.scripts]
 fp-spl = "fpspl.cli:main"
 

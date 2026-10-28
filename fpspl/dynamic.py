@@ -140,6 +140,7 @@ def run_dynamic_version(
     version_dir: Path, output_dir: Path, runtime: BrflRuntime,
     max_variants: int | None = None, max_tests: int | None = None,
     limit_failed_variants: int | None = None, limit_passing_variants: int | None = None,
+    model_kind: str = "graph",
 ) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     outcomes = read_observed_outcomes(version_dir)
@@ -185,8 +186,18 @@ def run_dynamic_version(
             errors.append({"variant": variant, "error": str(exc)})
     unlabeled = [graph for graphs in passing.values() for graph in graphs]
     unlabeled_index = {id(graph): index for index, graph in enumerate(unlabeled)}
-    model = train_pu_model(positive, unlabeled)
-    if model is not None:
+    if model_kind == "graph":
+        from fpspl.graph_model import train_graph_pu_model
+        model = train_graph_pu_model(positive, unlabeled)
+        model_scores = model.score_all(unlabeled) if model is not None else []
+        if model is not None:
+            model.save(output_dir / "graph_model.pt")
+    elif model_kind == "linear":
+        model = train_pu_model(positive, unlabeled)
+        model_scores = [model.score(graph, index) for index, graph in enumerate(unlabeled)] if model else []
+    else:
+        raise ValueError(f"Unknown model kind: {model_kind}")
+    if model_kind == "linear" and model is not None:
         with (output_dir / "pu_model.pkl").open("wb") as handle:
             pickle.dump(model, handle)
     rows = []
@@ -199,8 +210,9 @@ def run_dynamic_version(
                 ((template, graph_similarity(template, graph)) for template in positive),
                 key=lambda pair: pair[1][0],
             )
-            model_score = model.score(graph, unlabeled_index[id(graph)]) if model is not None else None
-            score = 0.65 * model_score + 0.35 * similarity if model_score is not None else similarity
+            model_score = model_scores[unlabeled_index[id(graph)]] if model is not None else None
+            score = (model_score if model_kind == "graph" else 0.65 * model_score + 0.35 * similarity) \
+                if model_score is not None else similarity
             comparisons.append((score, graph, best_template, model_score, similarity, components))
         if comparisons:
             score, graph, template, model_score, similarity, components = max(comparisons, key=lambda item: item[0])
@@ -229,6 +241,7 @@ def run_dynamic_version(
     summary = {"version": version_dir.name, "processed_variants": processed_variants,
                "positive_failed_tests": len(positive), "unlabeled_passing_tests": len(unlabeled),
                "trained_model": model is not None, "ranked_variants": sum("score" in row for row in rows),
+               "model_kind": model_kind,
                "trace_evidence": "BRFL bytecode instrumentation and runtime factor edges",
                "no_ground_truth_used_for_training": True, "errors": errors}
     (output_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
