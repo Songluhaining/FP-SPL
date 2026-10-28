@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 
 REPO = Path(__file__).resolve().parents[2] / "PULP"
+sys.dont_write_bytecode = True  # Keep imports from creating files in the reference repository.
 sys.path.insert(0, str(REPO))
 
 from consistent_testing_manager import FPMatricsCaculation as features

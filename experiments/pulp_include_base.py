@@ -13,6 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2] / "pulp_trial"
 PULP = ROOT.parent / "PULP"
+sys.dont_write_bytecode = True  # Keep imports from creating files in the reference repository.
 sys.path.insert(0, str(PULP))
 
 from consistent_testing_manager.LabelData import (  # noqa: E402
