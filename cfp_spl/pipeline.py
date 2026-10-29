@@ -38,11 +38,17 @@ class CounterfactualPipeline:
                  generator_command: str | None = None, neighbors: int = 1,
                  similarity_threshold: float = 0.55, top_k: int = 20,
                  inference: str = "tensor", spectrum_metric: str = "ensemble",
-                 max_region_variables: int = 14):
+                 max_region_variables: int = 14,
+                 deepseek_key_file: Path | None = None,
+                 deepseek_model: str = "deepseek-flash",
+                 deepseek_base_url: str = "https://api.deepseek.com"):
         self.dataset = dataset.resolve()
         self.output = output.resolve()
         self.runtime = BrflRuntime(self.output / "runtime", java_home.resolve())
-        self.generator = CounterfactualTestGenerator(generator_command)
+        self.generator = CounterfactualTestGenerator(
+            generator_command, deepseek_key_file=deepseek_key_file,
+            deepseek_model=deepseek_model, deepseek_base_url=deepseek_base_url,
+        )
         self.neighbors = neighbors
         self.similarity_threshold = similarity_threshold
         self.top_k = top_k

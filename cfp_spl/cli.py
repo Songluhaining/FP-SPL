@@ -23,6 +23,11 @@ def parser() -> argparse.ArgumentParser:
     value.add_argument("--max-region-variables", type=int, default=14,
                        help="单个精确张量区域允许的最大二值变量数")
     value.add_argument("--generator-command", help="生成测试的外部命令；可用{request}和{response}占位符")
+    value.add_argument("--deepseek-api-key-file", type=Path,
+                       help="DeepSeek接口密钥文件；默认读取环境变量或仓库同级deepseek-api-key.txt")
+    value.add_argument("--deepseek-model", default="deepseek-flash", help="用于生成反事实测试的模型名称")
+    value.add_argument("--deepseek-base-url", default="https://api.deepseek.com",
+                       help="DeepSeek接口根地址")
     value.add_argument("--plan-only", action="store_true", help="只生成配置与测试配对计划，不插桩执行")
     return value
 
@@ -30,8 +35,12 @@ def parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     CounterfactualPipeline(
-        args.dataset, args.output, args.java_home, args.generator_command,
-        args.neighbors, args.similarity_threshold, args.top_k,
-        args.inference, args.spectrum_metric, args.max_region_variables,
+        args.dataset, args.output, args.java_home,
+        generator_command=args.generator_command, neighbors=args.neighbors,
+        similarity_threshold=args.similarity_threshold, top_k=args.top_k,
+        inference=args.inference, spectrum_metric=args.spectrum_metric,
+        max_region_variables=args.max_region_variables,
+        deepseek_key_file=args.deepseek_api_key_file,
+        deepseek_model=args.deepseek_model, deepseek_base_url=args.deepseek_base_url,
     ).run(args.version, args.plan_only)
     return 0

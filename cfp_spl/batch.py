@@ -19,13 +19,19 @@ def main(argv: list[str] | None = None) -> int:
                         choices=("ensemble", "ochiai", "tarantula", "barinel", "jaccard"),
                         default="ensemble")
     parser.add_argument("--max-region-variables", type=int, default=14)
+    parser.add_argument("--generator-command")
+    parser.add_argument("--deepseek-api-key-file", type=Path)
+    parser.add_argument("--deepseek-model", default="deepseek-flash")
+    parser.add_argument("--deepseek-base-url", default="https://api.deepseek.com")
     args = parser.parse_args(argv)
     if args.shards < 1 or not 0 <= args.index < args.shards:
         raise ValueError("分片编号必须处于[0, 分片总数)范围")
     pipeline = CounterfactualPipeline(
-        args.dataset, args.output, args.java_home,
+        args.dataset, args.output, args.java_home, generator_command=args.generator_command,
         inference=args.inference, spectrum_metric=args.spectrum_metric,
         max_region_variables=args.max_region_variables,
+        deepseek_key_file=args.deepseek_api_key_file,
+        deepseek_model=args.deepseek_model, deepseek_base_url=args.deepseek_base_url,
     )
     pipeline.runtime.build_brfl()
     versions = [
