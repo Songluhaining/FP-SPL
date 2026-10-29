@@ -9,8 +9,14 @@ description = "Counterfactual causal identification of false-passing SPL configu
 requires-python = ">=3.10"
 dependencies = ["numpy>=1.24"]
 
+[project.optional-dependencies]
+learning = ["torch>=2.6,<2.9"]
+
 [project.scripts]
 fp-spl = "cfp_spl.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["cfp_spl*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
