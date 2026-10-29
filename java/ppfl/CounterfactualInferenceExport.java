@@ -11,7 +11,7 @@ import java.util.Base64;
 import java.util.IdentityHashMap;
 import java.util.List;
 
-/** 构建并推断BRFL原生因子图，然后无损导出节点、因子、参数表和关联角色。 */
+/** 构建单次执行的BRFL因子子图，无损导出节点、因子、参数表和关联角色。 */
 public final class CounterfactualInferenceExport {
     private static Field field(Class<?> type, String name) throws Exception {
         Field value = type.getDeclaredField(name);
@@ -79,7 +79,7 @@ public final class CounterfactualInferenceExport {
         graph.get_idom();
         graph.get_stores();
         graph.parsetrace(traceFile.getAbsolutePath(), testName, passed);
-        graph.bp_inference();
+        // 此处不对单次执行单独推理。A/B子图在Python侧共享语句节点后统一推理。
 
         IdentityHashMap<Node, String> ids = new IdentityHashMap<Node, String>();
         int index = 0;

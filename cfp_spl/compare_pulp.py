@@ -21,11 +21,7 @@ def compare(results: Path, pulp_predictions: Path) -> dict:
             key = (version, pair["passing_configuration"])
             if key not in new_score:
                 continue
-            candidates = [
-                stmt["failing_suspiciousness"] for stmt in pair["statements"]
-                if stmt["present_in_a"] and stmt["executed_in_a"] and stmt["causal_in_a"]
-                and stmt["failing_suspiciousness"] >= 0.50
-            ]
+            candidates = [stmt.get("joint_suspiciousness", 0.0) for stmt in pair["statements"]]
             if candidates:
                 new_score[key] = max(new_score[key], max(candidates))
 

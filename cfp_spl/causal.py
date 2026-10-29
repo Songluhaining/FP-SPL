@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .domain import FactorGraph, PairAssessment, StatementEvidence, TestPair
+from .domain import FactorGraph, JointStatementEvidence, PairAssessment, StatementEvidence, TestPair
 from .factor_graph import causal_statement_keys, statement_index
 from .feature_sources import FeatureMap, source_identity
+from .joint_graph import JointCounterfactualGraph
 
 
 def source_contains(stable_key: str, source_root: Path) -> bool:
@@ -97,6 +98,64 @@ def assess_pair(
         level = "weak_suspect"
     else:
         level = "insufficient"
+    return PairAssessment(
+        passing_config, failing_config, pair.failing.identity,
+        pair.passing.identity if pair.passing else None, "failed", "passed",
+        pair.provenance, pair.similarity, level, score, evidence, reasons,
+    )
+
+
+def assess_joint_pair(
+    passing_config: str,
+    failing_config: str,
+    pair: TestPair,
+    joint: JointCounterfactualGraph | None,
+    passing_outcome: str | None,
+    top_k: int = 20,
+    minimum_suspiciousness: float = 0.55,
+) -> PairAssessment:
+    """基于一次联合后验评价反事实配对，不再比较两次独立推理结果。"""
+    if passing_outcome == "failed":
+        return PairAssessment(
+            passing_config, failing_config, pair.failing.identity,
+            pair.passing.identity if pair.passing else None, "failed", "failed",
+            pair.provenance, pair.similarity, "confirmed_false_passing", 1.0, [],
+            ["反事实测试已在原本通过的配置上复现失败"],
+        )
+    if joint is None:
+        return PairAssessment(
+            passing_config, failing_config, pair.failing.identity, None, "failed", None,
+            pair.provenance, pair.similarity, "insufficient", 0.0, [],
+            ["缺少经过双侧编译和结果验证的联合反事实执行图"],
+        )
+
+    candidates = []
+    for node in joint.shared_statements:
+        source = joint.statement_source[node]
+        statement = joint.graph.statements[node]
+        if source in joint.failing_causal_sources:
+            candidates.append((node, source, statement.suspiciousness))
+    candidates.sort(key=lambda item: (-item[2], item[1], item[0]))
+    evidence = [
+        JointStatementEvidence(
+            stable_key=node,
+            feature_source=source,
+            joint_suspiciousness=suspiciousness,
+            executed_in_a=True,
+            executed_in_b=True,
+            causal_in_a=source in joint.passing_causal_sources,
+            causal_in_b=True,
+        )
+        for node, source, suspiciousness in candidates[:top_k]
+    ]
+    score = evidence[0].joint_suspiciousness if evidence else 0.0
+    qualifying = [item for item in evidence if item.joint_suspiciousness >= minimum_suspiciousness]
+    level = "strong_suspect" if qualifying else "insufficient"
+    reasons = [
+        f"联合图中有{len(qualifying)}条由A通过轨迹与B失败轨迹共同约束的高可疑共享语句"
+    ] if qualifying else [
+        "联合图中没有达到阈值且在A、B两侧均执行的故障因果语句"
+    ]
     return PairAssessment(
         passing_config, failing_config, pair.failing.identity,
         pair.passing.identity if pair.passing else None, "failed", "passed",

@@ -14,10 +14,9 @@ def diagnose(results: Path, labels_root: Path) -> dict:
     provenance_executed = Counter()
     error_messages = Counter()
     statement_total = present = executed = causal = 0
-    high_failing = large_gap = qualifying = 0
+    high_joint = qualifying = 0
     pair_with_graph = pair_with_aligned_causal = pair_with_qualifying = 0
-    aligned_gaps = []
-    aligned_failing = []
+    aligned_joint = []
     for version in sorted(path for path in results.iterdir() if path.is_dir() and path.name.startswith("_")):
         plan_path = version / "pair-plan.json"
         assessment_path = version / "pair-assessments.json"
@@ -42,18 +41,17 @@ def diagnose(results: Path, labels_root: Path) -> dict:
             has_aligned = has_qualifying = False
             for stmt in statements:
                 statement_total += 1
-                present += bool(stmt["present_in_a"])
-                executed += bool(stmt["executed_in_a"])
-                causal += bool(stmt["causal_in_a"])
-                high_failing += stmt["failing_suspiciousness"] >= 0.55
-                large_gap += stmt["posterior_gap"] >= 0.15
-                aligned = stmt["present_in_a"] and stmt["executed_in_a"] and stmt["causal_in_a"]
-                accepted = aligned and stmt["failing_suspiciousness"] >= 0.55 and stmt["posterior_gap"] >= 0.15
+                present += bool(stmt.get("present_in_a", stmt.get("executed_in_a", False)))
+                executed += bool(stmt.get("executed_in_a", False))
+                causal += bool(stmt.get("causal_in_a", False))
+                joint_score = stmt.get("joint_suspiciousness", 0.0)
+                high_joint += joint_score >= 0.55
+                aligned = stmt.get("executed_in_a", False) and stmt.get("executed_in_b", True)
+                accepted = aligned and joint_score >= 0.55
                 qualifying += accepted
                 if aligned:
                     has_aligned = True
-                    aligned_gaps.append(stmt["posterior_gap"])
-                    aligned_failing.append(stmt["failing_suspiciousness"])
+                    aligned_joint.append(joint_score)
                 has_qualifying = has_qualifying or accepted
             pair_with_aligned_causal += has_aligned
             pair_with_qualifying += has_qualifying
@@ -107,12 +105,10 @@ def diagnose(results: Path, labels_root: Path) -> dict:
             "pairs_with_qualifying_statement": pair_with_qualifying,
             "statements_examined": statement_total,
             "present_in_a": present, "executed_in_a": executed, "causal_in_a": causal,
-            "failing_suspiciousness_at_least_0_55": high_failing,
-            "posterior_gap_at_least_0_15": large_gap,
+            "joint_suspiciousness_at_least_0_55": high_joint,
             "qualifying_all_conditions": qualifying,
-            "aligned_gap_mean": statistics.fmean(aligned_gaps) if aligned_gaps else None,
-            "aligned_gap_median": statistics.median(aligned_gaps) if aligned_gaps else None,
-            "aligned_failing_suspiciousness_mean": statistics.fmean(aligned_failing) if aligned_failing else None,
+            "aligned_joint_suspiciousness_mean": statistics.fmean(aligned_joint) if aligned_joint else None,
+            "aligned_joint_suspiciousness_median": statistics.median(aligned_joint) if aligned_joint else None,
         },
         "ranking_diagnostics": {
             "false_passing_score_mean": statistics.fmean(positive_scores),

@@ -9,13 +9,10 @@ from .evaluation import _metrics
 
 
 RULES = {
-    "source_presence_b_susp_0_55": lambda s: s["present_in_a"] and s["failing_suspiciousness"] >= 0.55,
-    "executed_b_susp_0_55": lambda s: s["present_in_a"] and s["executed_in_a"] and s["failing_suspiciousness"] >= 0.55,
-    "causal_b_susp_0_55": lambda s: s["present_in_a"] and s["executed_in_a"] and s["causal_in_a"] and s["failing_suspiciousness"] >= 0.55,
-    "causal_b_susp_0_50": lambda s: s["present_in_a"] and s["executed_in_a"] and s["causal_in_a"] and s["failing_suspiciousness"] >= 0.50,
-    "causal_b_susp_0_55_positive_gap": lambda s: s["present_in_a"] and s["executed_in_a"] and s["causal_in_a"] and s["failing_suspiciousness"] >= 0.55 and s["posterior_gap"] > 0,
-    "causal_b_susp_0_55_gap_0_05": lambda s: s["present_in_a"] and s["executed_in_a"] and s["causal_in_a"] and s["failing_suspiciousness"] >= 0.55 and s["posterior_gap"] >= 0.05,
-    "full_gap_0_15": lambda s: s["present_in_a"] and s["executed_in_a"] and s["causal_in_a"] and s["failing_suspiciousness"] >= 0.55 and s["posterior_gap"] >= 0.15,
+    "joint_posterior_0_50": lambda s: s.get("joint_suspiciousness", 0.0) >= 0.50,
+    "joint_posterior_0_55": lambda s: s.get("joint_suspiciousness", 0.0) >= 0.55,
+    "joint_posterior_0_60": lambda s: s.get("joint_suspiciousness", 0.0) >= 0.60,
+    "joint_posterior_0_70": lambda s: s.get("joint_suspiciousness", 0.0) >= 0.70,
 }
 
 
@@ -35,7 +32,7 @@ def run(results: Path, labels_root: Path) -> dict:
             for rule, predicate in RULES.items():
                 matches = [s for s in pair["statements"] if predicate(s)]
                 if matches:
-                    score = max(s["failing_suspiciousness"] for s in matches)
+                    score = max(s["joint_suspiciousness"] for s in matches)
                     evidence[key][rule] = max(evidence[key][rule], score)
     ordered = sorted(labels)
     base_file = labels_root.parent / "base_case_labeling.json"

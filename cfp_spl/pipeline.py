@@ -8,12 +8,13 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .brfl_runtime import BrflRuntime
-from .causal import assess_pair
+from .causal import assess_joint_pair
 from .configurations import feature_delta, load_configurations, nearest_failing
-from .domain import Configuration, FactorGraph, JavaTestCase, PairAssessment
+from .domain import Configuration, JavaTestCase, PairAssessment
 from .factor_graph import load_factor_graph
-from .feature_sources import load_feature_map, source_identity
+from .feature_sources import load_feature_map
 from .generator import CounterfactualTestGenerator
+from .joint_graph import build_joint_counterfactual_graph
 from .java_tests import discover_tests, failed_test_identities, pair_tests
 from .spectrum import load_spectrum_priors, serialize_spectrum
 from .tensor_inference import infer_factor_graph
@@ -122,7 +123,7 @@ class CounterfactualPipeline:
         assessments, errors = [], []
         build_cache = {}
         execution_cache = {}
-        inference_cache = {}
+        graph_cache = {}
 
         def build(config: Configuration):
             if config.name not in build_cache:
@@ -138,46 +139,17 @@ class CounterfactualPipeline:
                 execution_cache[key] = self.runtime.execute(config, test, work, compiled)
             return execution_cache[key]
 
-        def inferred_graph(config: Configuration, execution):
-            key = (config.name, str(execution.graph_path), self.inference)
-            if key not in inference_cache:
-                graph = load_factor_graph(execution.graph_path)
-                if self.inference == "tensor":
-                    diagnostics = infer_factor_graph(
-                        graph, spectrum_priors[config.name], feature_maps[config.name],
-                        max_region_variables=self.max_region_variables,
-                    )
-                    (execution.graph_path.parent / "tensor-inference.json").write_text(
-                        json.dumps(diagnostics.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
-                    )
-                    posterior_path = execution.graph_path.parent / "tensor-posteriors.tsv"
-                    with posterior_path.open("w", encoding="utf-8", newline="") as stream:
-                        writer = csv.writer(stream, delimiter="\t")
-                        writer.writerow((
-                            "node", "statement", "feature_source", "spectrum_error_prior",
-                            "posterior_error", "observed",
-                        ))
-                        for node, statement in sorted(graph.statements.items()):
-                            source = source_identity(statement.stable_key, feature_maps[config.name])
-                            evidence = spectrum_priors[config.name].get(source)
-                            writer.writerow((
-                                node, statement.stable_key, source,
-                                evidence.error_prior if evidence else 0.01,
-                                statement.suspiciousness, int(statement.observed),
-                            ))
-                inference_cache[key] = graph
-            return inference_cache[key]
+        def raw_graph(config: Configuration, execution):
+            key = (config.name, str(execution.graph_path))
+            if key not in graph_cache:
+                graph_cache[key] = load_factor_graph(execution.graph_path)
+            return graph_cache[key]
 
         for config_a, config_b, pair, row in jobs:
             try:
                 if pair.passing is None:
-                    assessment = assess_pair(
-                        config_a.name, config_b.name, pair,
-                        failing_graph=FactorGraph(),
-                        passing_graph=None, passing_outcome=None,
-                        passing_source_root=config_a.variant_dir / "src",
-                        failing_feature_map=feature_maps[config_b.name],
-                        passing_feature_map=feature_maps[config_a.name], top_k=self.top_k,
+                    assessment = assess_joint_pair(
+                        config_a.name, config_b.name, pair, None, None, self.top_k,
                     )
                 else:
                     generated = pair.provenance == "generated"
@@ -196,13 +168,53 @@ class CounterfactualPipeline:
                     if execution_b.outcome != "failed":
                         raise RuntimeError("反事实测试没有在未通过配置B上复现失败")
                     execution_a = execute(config_a, pair.passing, work_a, build_a)
-                    assessment = assess_pair(
-                        config_a.name, config_b.name, pair,
-                        inferred_graph(config_b, execution_b),
-                        inferred_graph(config_a, execution_a), execution_a.outcome,
-                        config_a.variant_dir / "src",
-                        feature_maps[config_b.name], feature_maps[config_a.name], self.top_k,
-                    )
+                    if execution_a.outcome == "failed":
+                        assessment = assess_joint_pair(
+                            config_a.name, config_b.name, pair, None, "failed", self.top_k,
+                        )
+                    else:
+                        if self.inference != "tensor":
+                            raise ValueError("联合反事实图当前只支持自适应区域张量推理")
+                        joint = build_joint_counterfactual_graph(
+                            raw_graph(config_b, execution_b), raw_graph(config_a, execution_a),
+                            feature_maps[config_b.name], feature_maps[config_a.name],
+                        )
+                        # B提供故障侧频谱先验；B中缺失的源码位置再由A补充。
+                        priors = dict(spectrum_priors[config_a.name])
+                        priors.update(spectrum_priors[config_b.name])
+                        diagnostics = infer_factor_graph(
+                            joint.graph, priors, {},
+                            max_region_variables=self.max_region_variables,
+                        )
+                        pair_name = hashlib.sha1(
+                            f"{pair.failing.identity}|{pair.passing.identity}".encode("utf-8")
+                        ).hexdigest()[:12]
+                        joint_out = out / "joint-runs" / config_a.name / config_b.name / pair_name
+                        joint_out.mkdir(parents=True, exist_ok=True)
+                        (joint_out / "tensor-inference.json").write_text(
+                            json.dumps(diagnostics.to_dict(), ensure_ascii=False, indent=2),
+                            encoding="utf-8",
+                        )
+                        with (joint_out / "tensor-posteriors.tsv").open(
+                            "w", encoding="utf-8", newline=""
+                        ) as stream:
+                            writer = csv.writer(stream, delimiter="\t")
+                            writer.writerow((
+                                "node", "source_statement", "execution_sides",
+                                "spectrum_error_prior", "posterior_error",
+                            ))
+                            for node, statement in sorted(joint.graph.statements.items()):
+                                source = joint.statement_source[node]
+                                evidence = priors.get(source)
+                                writer.writerow((
+                                    node, source, "+".join(sorted(joint.statement_sides[node])),
+                                    evidence.error_prior if evidence else 0.01,
+                                    statement.suspiciousness,
+                                ))
+                        assessment = assess_joint_pair(
+                            config_a.name, config_b.name, pair, joint,
+                            execution_a.outcome, self.top_k,
+                        )
                 assessments.append(assessment)
             except Exception as exc:
                 errors.append({**row, "error": str(exc), "traceback": traceback.format_exc()})

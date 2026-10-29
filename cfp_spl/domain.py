@@ -80,6 +80,17 @@ class StatementEvidence:
     causal_in_a: bool
 
 
+@dataclass(frozen=True)
+class JointStatementEvidence:
+    stable_key: str
+    feature_source: str
+    joint_suspiciousness: float
+    executed_in_a: bool
+    executed_in_b: bool
+    causal_in_a: bool
+    causal_in_b: bool
+
+
 @dataclass
 class PairAssessment:
     passing_configuration: str
@@ -94,5 +105,5 @@ class PairAssessment:
         "confirmed_false_passing", "strong_suspect", "weak_suspect", "insufficient"
     ]
     score: float
-    statements: list[StatementEvidence]
+    statements: list[StatementEvidence | JointStatementEvidence]
     reasons: list[str]

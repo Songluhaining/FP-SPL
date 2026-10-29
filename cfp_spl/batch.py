@@ -14,7 +14,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--java-home", type=Path, required=True)
     parser.add_argument("--shards", type=int, required=True)
     parser.add_argument("--index", type=int, required=True)
-    parser.add_argument("--inference", choices=("tensor", "brfl"), default="tensor")
+    parser.add_argument("--inference", choices=("tensor",), default="tensor")
     parser.add_argument("--spectrum-metric",
                         choices=("ensemble", "ochiai", "tarantula", "barinel", "jaccard"),
                         default="ensemble")
