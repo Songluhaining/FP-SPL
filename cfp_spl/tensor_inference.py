@@ -75,6 +75,7 @@ def _raw_factors(
     spectrum: dict[str, SpectrumEvidence],
     feature_map: FeatureMap,
     default_error_prior: float,
+    statement_error_priors: dict[str, float] | None = None,
 ) -> tuple[list[TensorFactor], int, int]:
     by_factor: dict[str, list[str]] = {}
     for factor, node, _role in graph.incidences:
@@ -92,11 +93,14 @@ def _raw_factors(
             value = True if statement.observed_value is None else statement.observed_value
             factors.append(TensorFactor((identity,), np.asarray([not value, value], dtype=float)))
             continue
+        explicit = (statement_error_priors or {}).get(identity)
         key = source_identity(statement.stable_key, feature_map)
-        evidence = spectrum.get(key)
-        error = evidence.error_prior if evidence else default_error_prior
-        matched += evidence is not None
-        missing += evidence is None
+        evidence = spectrum.get(key) if explicit is None else None
+        error = explicit if explicit is not None else (
+            evidence.error_prior if evidence else default_error_prior
+        )
+        matched += explicit is not None or evidence is not None
+        missing += explicit is None and evidence is None
         factors.append(TensorFactor((identity,), np.asarray([error, 1.0 - error])))
     for identity, value in graph.values.items():
         if value.get("observed"):
@@ -337,10 +341,11 @@ def infer_factor_graph(
     max_iterations: int = 100,
     damping: float = 0.35,
     tolerance: float = 1e-8,
+    statement_error_priors: dict[str, float] | None = None,
 ) -> InferenceDiagnostics:
     """用自适应区域张量推理更新图中语句和值的正确性后验。"""
     factors, matched, missing = _raw_factors(
-        graph, spectrum, feature_map, default_error_prior,
+        graph, spectrum, feature_map, default_error_prior, statement_error_priors,
     )
     cliques, width = _triangulate(factors)
     if width < max_region_variables:
