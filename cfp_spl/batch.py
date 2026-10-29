@@ -14,10 +14,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--java-home", type=Path, required=True)
     parser.add_argument("--shards", type=int, required=True)
     parser.add_argument("--index", type=int, required=True)
+    parser.add_argument("--inference", choices=("tensor", "brfl"), default="tensor")
+    parser.add_argument("--spectrum-metric",
+                        choices=("ensemble", "ochiai", "tarantula", "barinel", "jaccard"),
+                        default="ensemble")
+    parser.add_argument("--max-region-variables", type=int, default=14)
     args = parser.parse_args(argv)
     if args.shards < 1 or not 0 <= args.index < args.shards:
         raise ValueError("分片编号必须处于[0, 分片总数)范围")
-    pipeline = CounterfactualPipeline(args.dataset, args.output, args.java_home)
+    pipeline = CounterfactualPipeline(
+        args.dataset, args.output, args.java_home,
+        inference=args.inference, spectrum_metric=args.spectrum_metric,
+        max_region_variables=args.max_region_variables,
+    )
     pipeline.runtime.build_brfl()
     versions = [
         path for path in sorted(args.dataset.iterdir())

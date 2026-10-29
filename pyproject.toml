@@ -7,7 +7,7 @@ name = "fp-spl"
 version = "0.2.0"
 description = "Counterfactual causal identification of false-passing SPL configurations"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = ["numpy>=1.24"]
 
 [project.scripts]
 fp-spl = "cfp_spl.cli:main"

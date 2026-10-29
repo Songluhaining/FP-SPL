@@ -93,7 +93,8 @@ public final class CounterfactualInferenceExport {
         for (StmtNode stmt : graph.stmts) {
             out.write("STATEMENT\t" + id(stmt, ids) + "\t" + encode(stmt.getName()) + "\t"
                     + stmt.bp_getprob() + "\t" + (bool(stmt, "obs") ? "1" : "0") + "\t"
-                    + (stmt.getreduced() ? "1" : "0") + "\n");
+                    + (stmt.getreduced() ? "1" : "0") + "\t"
+                    + (bool(stmt, "obsvalue") ? "1" : "0") + "\n");
         }
         for (Node node : graph.nodes) {
             String[] stack = node.getStackValue();
@@ -101,7 +102,8 @@ public final class CounterfactualInferenceExport {
             Node origin = (Node) field(Node.class, "stmt").get(node);
             out.write("VALUE\t" + id(node, ids) + "\t" + encode(node.getName()) + "\t"
                     + encode(origin == null ? "" : origin.getName()) + "\t" + encode(stackText) + "\t"
-                    + node.bp_getprob() + "\t" + (bool(node, "obs") ? "1" : "0") + "\n");
+                    + node.bp_getprob() + "\t" + (bool(node, "obs") ? "1" : "0") + "\t"
+                    + (bool(node, "obsvalue") ? "1" : "0") + "\n");
         }
         index = 0;
         for (FactorNode factor : graph.factornodes) {

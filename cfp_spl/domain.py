@@ -53,6 +53,7 @@ class StatementPosterior:
     correctness: float
     observed: bool
     reduced: bool
+    observed_value: bool | None = None
 
     @property
     def suspiciousness(self) -> float:

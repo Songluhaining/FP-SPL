@@ -12,9 +12,11 @@ from .causal import assess_pair
 from .configurations import feature_delta, load_configurations, nearest_failing
 from .domain import Configuration, FactorGraph, JavaTestCase, PairAssessment
 from .factor_graph import load_factor_graph
-from .feature_sources import load_feature_map
+from .feature_sources import load_feature_map, source_identity
 from .generator import CounterfactualTestGenerator
 from .java_tests import discover_tests, failed_test_identities, pair_tests
+from .spectrum import load_spectrum_priors, serialize_spectrum
+from .tensor_inference import infer_factor_graph
 
 
 def _failed_tests(config: Configuration) -> list[JavaTestCase]:
@@ -34,7 +36,9 @@ def _serialize_assessment(value: PairAssessment) -> dict:
 class CounterfactualPipeline:
     def __init__(self, dataset: Path, output: Path, java_home: Path,
                  generator_command: str | None = None, neighbors: int = 1,
-                 similarity_threshold: float = 0.55, top_k: int = 20):
+                 similarity_threshold: float = 0.55, top_k: int = 20,
+                 inference: str = "tensor", spectrum_metric: str = "ensemble",
+                 max_region_variables: int = 14):
         self.dataset = dataset.resolve()
         self.output = output.resolve()
         self.runtime = BrflRuntime(self.output / "runtime", java_home.resolve())
@@ -42,6 +46,9 @@ class CounterfactualPipeline:
         self.neighbors = neighbors
         self.similarity_threshold = similarity_threshold
         self.top_k = top_k
+        self.inference = inference
+        self.spectrum_metric = spectrum_metric
+        self.max_region_variables = max_region_variables
 
     def run(self, version_name: str | None = None, plan_only: bool = False) -> dict:
         self.output.mkdir(parents=True, exist_ok=True)
@@ -67,6 +74,16 @@ class CounterfactualPipeline:
         passing = [c for c in configs if c.outcome == "passed"]
         test_cache = {c.name: discover_tests(c.variant_dir) for c in configs}
         feature_maps = {c.name: load_feature_map(c.variant_dir) for c in configs}
+        spectrum_priors = {
+            c.name: load_spectrum_priors(c.variant_dir, self.spectrum_metric) for c in configs
+        }
+        spectrum_out = out / "spectrum-priors"
+        spectrum_out.mkdir(exist_ok=True)
+        for config in configs:
+            (spectrum_out / f"{config.name}.json").write_text(
+                json.dumps(serialize_spectrum(spectrum_priors[config.name]), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
         plan, jobs = [], []
         for config_a in passing:
             for config_b, distance in nearest_failing(config_a, configs, self.neighbors):
@@ -99,6 +116,7 @@ class CounterfactualPipeline:
         assessments, errors = [], []
         build_cache = {}
         execution_cache = {}
+        inference_cache = {}
 
         def build(config: Configuration):
             if config.name not in build_cache:
@@ -113,6 +131,36 @@ class CounterfactualPipeline:
             if key not in execution_cache:
                 execution_cache[key] = self.runtime.execute(config, test, work, compiled)
             return execution_cache[key]
+
+        def inferred_graph(config: Configuration, execution):
+            key = (config.name, str(execution.graph_path), self.inference)
+            if key not in inference_cache:
+                graph = load_factor_graph(execution.graph_path)
+                if self.inference == "tensor":
+                    diagnostics = infer_factor_graph(
+                        graph, spectrum_priors[config.name], feature_maps[config.name],
+                        max_region_variables=self.max_region_variables,
+                    )
+                    (execution.graph_path.parent / "tensor-inference.json").write_text(
+                        json.dumps(diagnostics.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
+                    )
+                    posterior_path = execution.graph_path.parent / "tensor-posteriors.tsv"
+                    with posterior_path.open("w", encoding="utf-8", newline="") as stream:
+                        writer = csv.writer(stream, delimiter="\t")
+                        writer.writerow((
+                            "node", "statement", "feature_source", "spectrum_error_prior",
+                            "posterior_error", "observed",
+                        ))
+                        for node, statement in sorted(graph.statements.items()):
+                            source = source_identity(statement.stable_key, feature_maps[config.name])
+                            evidence = spectrum_priors[config.name].get(source)
+                            writer.writerow((
+                                node, statement.stable_key, source,
+                                evidence.error_prior if evidence else 0.01,
+                                statement.suspiciousness, int(statement.observed),
+                            ))
+                inference_cache[key] = graph
+            return inference_cache[key]
 
         for config_a, config_b, pair, row in jobs:
             try:
@@ -144,8 +192,8 @@ class CounterfactualPipeline:
                     execution_a = execute(config_a, pair.passing, work_a, build_a)
                     assessment = assess_pair(
                         config_a.name, config_b.name, pair,
-                        load_factor_graph(execution_b.graph_path),
-                        load_factor_graph(execution_a.graph_path), execution_a.outcome,
+                        inferred_graph(config_b, execution_b),
+                        inferred_graph(config_a, execution_a), execution_a.outcome,
                         config_a.variant_dir / "src",
                         feature_maps[config_b.name], feature_maps[config_a.name], self.top_k,
                     )

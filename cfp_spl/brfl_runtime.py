@@ -57,10 +57,12 @@ class BrflRuntime:
 
     def build_brfl(self) -> None:
         bridge_class = self.classes / "ppfl" / "CounterfactualInferenceExport.class"
-        if self.agent.is_file() and bridge_class.is_file():
+        sources = sorted((self.brfl / "src" / "main" / "java").rglob("*.java"))
+        newest_source = max((path.stat().st_mtime for path in (*sources, self.bridge)), default=0.0)
+        if (self.agent.is_file() and bridge_class.is_file()
+                and min(self.agent.stat().st_mtime, bridge_class.stat().st_mtime) >= newest_source):
             return
         self.classes.mkdir(parents=True, exist_ok=True)
-        sources = sorted((self.brfl / "src" / "main" / "java").rglob("*.java"))
         response = self.work_root / "brfl-sources.txt"
         response.write_text("\n".join(x.relative_to(self.brfl).as_posix() for x in sources) + "\n", encoding="ascii")
         log = self.work_root / "brfl-build.log"
