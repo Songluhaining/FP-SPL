@@ -82,4 +82,7 @@ def nearest_failing(
         ((c, euclidean_distance(passing, c)) for c in failures),
         key=lambda item: (item[1], item[0].name),
     )
-    return ranked[: max(1, count)]
+    # count表示至少保留前count个，边界距离上的并列项全部保留。
+    # 默认count=1时，所有并列最近的失败配置均入选，名称只决定输出顺序。
+    cutoff = ranked[min(max(1, count), len(ranked)) - 1][1]
+    return [(config, distance) for config, distance in ranked if distance <= cutoff]

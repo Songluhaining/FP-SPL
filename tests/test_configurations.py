@@ -14,3 +14,5 @@ def test_binary_euclidean_is_sqrt_hamming_and_ties_are_deterministic():
     f1 = config("F1", [1, 1, 1], "failed")
     assert euclidean_distance(passing, f1) == 1.0
     assert [x.name for x, _ in nearest_failing(passing, [passing, f2, f1], 2)] == ["F1", "F2"]
+    farther = config("F3", [0, 1, 1], "failed")
+    assert [x.name for x, _ in nearest_failing(passing, [farther, f2, f1])] == ["F1", "F2"]

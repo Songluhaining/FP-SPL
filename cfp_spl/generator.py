@@ -11,10 +11,19 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
+from collections import Counter
+from typing import Callable
 
 from .configurations import feature_delta
 from .domain import Configuration, JavaTestCase, TestPair
-from .java_tests import extract_tests, oracle_signature, test_similarity
+from .java_tests import ASSERTION, canonical_tokens, extract_tests, oracle_signature, test_similarity
+
+
+def _request_digest(payload: dict, model: str, endpoint: str) -> str:
+    """输入、模型、服务或生成协议变化时，不复用旧模型响应。"""
+    raw = json.dumps(["validated-generation-v2", model, endpoint, payload],
+                     ensure_ascii=False, sort_keys=True).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
 
 
 CLASS_NAME = re.compile(r"^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$")
@@ -208,6 +217,8 @@ class CounterfactualTestGenerator:
                 "rationale": "输入场景、行为与判定目标是否一致的理由",
             },
         }
+        digest = _request_digest(payload, self.deepseek_model, self.deepseek_base_url)
+        response = request_dir / f"{stem}.{digest[:16]}.response.json"
         request.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         try:
             if response.is_file():
@@ -311,60 +322,83 @@ class CounterfactualTestGenerator:
         return json.loads(response.read_text(encoding="utf-8"))
 
     def generate(self, passing: Configuration, failing: Configuration,
-                 failed_test: JavaTestCase, request_dir: Path) -> TestPair:
+                 failed_test: JavaTestCase, request_dir: Path,
+                 validator: Callable[[JavaTestCase], dict] | None = None,
+                 max_rounds: int = 3) -> TestPair:
+        """最多三轮修复；validator返回真实编译/执行结果，有效才结束。
+
+        无validator时仅完成源码结构校验，不能据此认定生成测试有效。
+        每轮请求/响应/验证均保留，修复不得改变原断言。
+        """
         request_dir.mkdir(parents=True, exist_ok=True)
         stem = f"{failed_test.class_name.replace('.', '_')}.{failed_test.method_name}"
         request = request_dir / f"{stem}.request.json"
-        response = request_dir / f"{stem}.response.json"
         payload = self._payload(passing, failing, failed_test)
         request.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        feedback = None
         try:
-            if response.is_file():
-                cached = json.loads(response.read_text(encoding="utf-8"))
-                answer = {key: value for key, value in cached.items() if key != "_metadata"}
-                metadata = cached.get("_metadata", {"provider": "cached"})
-            elif self.command:
-                answer = self._external(request, response, request_dir)
-                metadata = {"provider": "external-command"}
-            else:
-                api_key = _read_api_key(self.deepseek_key_file)
-                if not api_key:
-                    return TestPair(failed_test, None, "missing", 0.0, 0.0, request,
-                                    "未找到DeepSeek接口密钥，也未配置外部测试生成命令")
-                client = DeepSeekClient(
-                    api_key, self.deepseek_model, self.deepseek_base_url, self.timeout
-                )
-                generation_payload = payload
-                for generation_round in range(1, 3):
-                    answer, metadata = client.complete(generation_payload)
-                    try:
-                        self._validate_answer(answer, payload)
-                        metadata["generation_round"] = generation_round
-                        break
-                    except ValueError as exc:
-                        if generation_round == 2:
-                            raise
-                        generation_payload = {
-                            **payload,
-                            "correction_request": (
-                                f"上一次响应未通过结构校验：{exc}。请重新生成，严格遵守指定身份和响应结构。"
-                            ),
-                        }
-            self._validate_answer(answer, payload)
-            response.write_text(json.dumps({**answer, "_metadata": metadata},
-                                           ensure_ascii=False, indent=2), encoding="utf-8")
-            source_path = (request_dir / "generated").joinpath(
-                *answer["class_name"].split(".")).with_suffix(".java")
-            source_path.parent.mkdir(parents=True, exist_ok=True)
-            source_path.write_text(answer["java_source"], encoding="utf-8")
-            cases = [case for case in extract_tests(source_path)
-                     if case.method_name == answer["method_name"]]
-            if len(cases) != 1:
-                raise ValueError("生成结果不含指定的唯一测试方法")
-            generated = cases[0]
-            similarity, oracle = test_similarity(failed_test, generated)
-            return TestPair(failed_test, generated, "generated", similarity, oracle,
-                            request, answer["rationale"])
+            for generation_round in range(1, max_rounds + 1):
+                generation_payload = dict(payload)
+                if feedback:
+                    generation_payload["repair_feedback"] = feedback
+                digest = _request_digest(generation_payload, self.deepseek_model,
+                                         self.deepseek_base_url + str(self.command))
+                prefix = f"{stem}.round-{generation_round}.{digest[:16]}"
+                round_request = request_dir / f"{prefix}.request.json"
+                response = request_dir / f"{prefix}.response.json"
+                round_request.write_text(json.dumps(generation_payload, ensure_ascii=False, indent=2),
+                                         encoding="utf-8")
+                if response.is_file():
+                    cached = json.loads(response.read_text(encoding="utf-8"))
+                    answer = {key: value for key, value in cached.items() if key != "_metadata"}
+                    metadata = cached.get("_metadata", {})
+                elif self.command:
+                    answer = self._external(round_request, response, request_dir)
+                    metadata = {"provider": "external-command"}
+                else:
+                    api_key = _read_api_key(self.deepseek_key_file)
+                    if not api_key:
+                        raise ValueError("未找到DeepSeek接口密钥，也未配置外部测试生成命令")
+                    answer, metadata = DeepSeekClient(
+                        api_key, self.deepseek_model, self.deepseek_base_url, self.timeout
+                    ).complete(generation_payload)
+                response.write_text(json.dumps({**answer, "_metadata": metadata},
+                                               ensure_ascii=False, indent=2), encoding="utf-8")
+                try:
+                    self._validate_answer(answer, payload)
+                    source_path = (request_dir / "generated").joinpath(
+                        *answer["class_name"].split(".")).with_suffix(".java")
+                    source_path.parent.mkdir(parents=True, exist_ok=True)
+                    source_path.write_text(answer["java_source"], encoding="utf-8")
+                    cases = extract_tests(source_path)
+                    if len(cases) != 1 or cases[0].method_name != answer["method_name"]:
+                        raise ValueError("生成结果必须且只能包含指定测试方法")
+                    generated = cases[0]
+                    # 保守校验：逐个保留原断言表达式，连重复次数也不能减少。
+                    # 需要改写断言的情形暂不自动接受，避免修复时偷换判定条件。
+                    original = Counter(" ".join(canonical_tokens(x))
+                                       for x in ASSERTION.findall(failed_test.body))
+                    actual = Counter(" ".join(canonical_tokens(x))
+                                     for x in ASSERTION.findall(generated.body))
+                    if not original or original != actual:
+                        raise ValueError("必须原样保留所有断言；无显式断言的测试暂不自动接受")
+                    if re.search(r"\b(?:catch|if|switch|return|throw|try)\b|\b(?:Assume|assume\w*|fail)\s*\(",
+                                 generated.body):
+                        raise ValueError("生成测试不得通过异常、提前退出或条件判断绕过原断言")
+                    validation = validator(generated) if validator else {
+                        "valid": True, "scope": "structure-only-not-execution-validated"}
+                except Exception as exc:
+                    validation = {"valid": False, "error": str(exc)}
+                (request_dir / f"{prefix}.validation.json").write_text(
+                    json.dumps(validation, ensure_ascii=False, indent=2), encoding="utf-8")
+                if validation.get("valid"):
+                    similarity, oracle = test_similarity(failed_test, generated)
+                    return TestPair(failed_test, generated, "generated", similarity, oracle,
+                                    round_request, answer["rationale"])
+                feedback = {"previous_java_source": answer.get("java_source", ""),
+                            "validation": validation,
+                            "instruction": "依据诊断修复接口和初始化，保留原输入场景及全部断言；禁止强行制造失败。"}
+            raise ValueError(f"{max_rounds}轮生成均未通过验证：{validation}")
         except Exception as exc:
             (request_dir / f"{stem}.error.txt").write_text(str(exc), encoding="utf-8")
             return TestPair(failed_test, None, "missing", 0.0, 0.0, request,

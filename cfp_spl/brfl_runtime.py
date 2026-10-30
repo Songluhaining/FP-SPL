@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -60,10 +61,14 @@ class BrflRuntime:
     def build_brfl(self) -> None:
         """从本仓库vendor目录编译代理及导出桥接程序，不调用原BRFL仓库。"""
         bridge_class = self.classes / "ppfl" / "CounterfactualInferenceExport.class"
-        if self.agent.is_file() and bridge_class.is_file():
+        sources = sorted((self.brfl / "src" / "main" / "java").rglob("*.java"))
+        # 源码修改后必须重建，避免旧桥接程序掩盖结果标记等修复。
+        digest = hashlib.sha256(b"".join(p.read_bytes() for p in [*sources, self.bridge])).hexdigest()
+        stamp = self.work_root / "source-digest.txt"
+        if (self.agent.is_file() and bridge_class.is_file() and stamp.is_file()
+                and stamp.read_text(encoding="ascii") == digest):
             return
         self.classes.mkdir(parents=True, exist_ok=True)
-        sources = sorted((self.brfl / "src" / "main" / "java").rglob("*.java"))
         response = self.work_root / "brfl-sources.txt"
         response.write_text("\n".join(x.relative_to(self.brfl).as_posix() for x in sources) + "\n", encoding="ascii")
         log = self.work_root / "brfl-build.log"
@@ -81,6 +86,7 @@ class BrflRuntime:
                       "-C", str(self.classes), "."], self.work_root, log)
         if result.returncode:
             raise RuntimeError(f"插桩代理打包失败：{log}")
+        stamp.write_text(digest, encoding="ascii")
 
     def compile_configuration(self, config: Configuration, output: Path,
                               extra_test: Path | None = None) -> Build:
@@ -160,7 +166,8 @@ class BrflRuntime:
         export_cp = os.pathsep.join((str(self.classes), str(self.lib / "*")))
         export_log = stage / "factor-inference.log"
         exported = run([str(self.java), "-cp", export_cp, "ppfl.CounterfactualInferenceExport",
-                        str(source_dir), str(trace), oracle, outcome.upper(), str(graph)], stage, export_log)
+                        str(source_dir), str(trace), oracle,
+                        "PASS" if outcome == "passed" else "FAIL", str(graph)], stage, export_log)
         if exported.returncode:
             raise RuntimeError(f"BRFL因果推理失败：{export_log}")
         return Execution(outcome, graph, log, status["expected"], status["actual"])

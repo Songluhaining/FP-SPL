@@ -61,7 +61,12 @@ public final class CounterfactualInferenceExport {
         File sourceDir = new File(args[0]);
         File traceFile = new File(args[1]);
         String testName = args[2];
-        boolean passed = "PASS".equalsIgnoreCase(args[3]);
+        String outcome = args[3].toUpperCase(java.util.Locale.ROOT);
+        if (!outcome.equals("PASS") && !outcome.equals("PASSED")
+                && !outcome.equals("FAIL") && !outcome.equals("FAILED")) {
+            throw new IllegalArgumentException("unknown test outcome: " + args[3]);
+        }
+        boolean passed = outcome.equals("PASS") || outcome.equals("PASSED");
         File output = new File(args[4]);
 
         // 每次调用只接收一个测试执行轨迹；当前不合并A/B或多测试证据。

@@ -101,6 +101,8 @@ class CounterfactualPipeline:
                         pair = self.generator.generate(
                             config_a, config_b, failed_test,
                             out / "generation-requests" / config_a.name / config_b.name,
+                            validator=None if plan_only else lambda test, a=config_a, b=config_b:
+                                self._validate_generated(a, b, test, out),
                         )
                     row = {
                         "passing_configuration": config_a.name,
@@ -159,7 +161,7 @@ class CounterfactualPipeline:
                     if generated:
                         # 生成测试需在同一源码下分别对A/B重新编译；短目录避免Windows路径过长。
                         generated_id = hashlib.sha1(
-                            f"{config_a.name}|{config_b.name}|{pair.passing.identity}".encode("utf-8")
+                            f"{config_a.name}|{config_b.name}|{pair.passing.identity}|{pair.passing.full_source}".encode("utf-8")
                         ).hexdigest()[:12]
                         work_b = out / "g" / generated_id / "b"
                         work_a = out / "g" / generated_id / "a"
@@ -226,6 +228,44 @@ class CounterfactualPipeline:
         self._write_ranking(out / "ranking.csv", passing, assessments)
         return {"passing_configurations": len(passing), "pairs": len(plan),
                 "executed": len(assessments), "errors": len(errors)}
+
+    def _validate_generated(self, a: Configuration, b: Configuration,
+                            test: JavaTestCase, out: Path) -> dict:
+        """反馈真实编译诊断；B必须断言失败，A异常失败不能当作确认假通过。
+
+        每个源码版本使用独立目录，避免修复后误用上轮class和执行结果。
+        编译执行只能验证机械条件，语义等价性仍需人工检查请求与测试。
+        """
+        digest = hashlib.sha256((a.name + b.name + test.full_source).encode()).hexdigest()[:16]
+        result = {"valid": False, "executions": {}}
+        for side, config in (("B", b), ("A", a)):
+            work = out / "v" / digest / side
+            try:
+                compiled = self.runtime.compile_configuration(config, work, test.source_path)
+                execution = self.runtime.execute(config, test, work, compiled, require_graph=False)
+                log = execution.log_path.read_text(encoding="utf-8", errors="replace")
+                assertion_failure = any(marker in log for marker in (
+                    "AssertionError", "AssertionFailedError", "ComparisonFailure"))
+                result["executions"][side] = {"outcome": execution.outcome,
+                                                 "assertion_failure": assertion_failure}
+                if execution.outcome == "failed" and not assertion_failure:
+                    raise ValueError("执行因非断言异常失败，不构成可靠故障证据")
+                if side == "B" and execution.outcome != "failed":
+                    raise ValueError("B未复现失败；不能通过修改断言强行复现")
+            except Exception as exc:
+                result["side"] = side
+                result["error"] = str(exc)
+                # 只反馈本次生成的诊断日志，不传密钥或环境变量。
+                result["diagnostics"] = {
+                    name: path.read_text(encoding="utf-8", errors="replace")[-16000:]
+                    for name, path in (("compile", work / "compile.log"),
+                                       ("execution", work / "runs" / test.class_name.replace(".", "_")
+                                        / (test.method_name + ".outcome-only") / "test-run.log"))
+                    if path.is_file()
+                }
+                return result
+        result["valid"] = True
+        return result
 
     @staticmethod
     def _write_ranking(path: Path, passing: list[Configuration], assessments: list[PairAssessment]) -> None:
