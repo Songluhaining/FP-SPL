@@ -184,6 +184,12 @@ public final class CounterfactualInferenceExport {
                     shared.put(identity, canonical);
                     merged.stmts.add(canonical);
                 }
+                // 测试代码被BRFL视为正确的已知语句；合并时保留其观测，不能丢失。
+                if (bool(stmt, "obs")) {
+                    if (bool(canonical, "obs") && canonical.obsvalue != stmt.obsvalue)
+                        throw new IllegalStateException("conflicting statement observation: " + identity);
+                    canonical.observe(stmt.obsvalue);
+                }
                 replacements.put(stmt, canonical);
             }
             for (Node value : local.nodes) {

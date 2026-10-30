@@ -136,7 +136,9 @@ class BrflRuntime:
                 build: Build, require_graph: bool = True) -> Execution:
         """执行一个测试；require_graph=False仍插桩，但跳过构图和推理。"""
         # Windows长路径会让Java日志目录无法清理；身份在status中保存，目录用短摘要。
-        run_id = hashlib.sha256((test.identity + test.full_source + build.source_digest).encode()).hexdigest()[:12]
+        stamp = self.work_root / "source-digest.txt"
+        runtime_digest = stamp.read_text(encoding="ascii") if stamp.is_file() else "unbuilt"
+        run_id = hashlib.sha256((test.identity + test.full_source + build.source_digest + runtime_digest).encode()).hexdigest()[:12]
         stage = output / "runs" / run_id / ("graph" if require_graph else "outcome")
         cached_status = stage / "status.json"
         if cached_status.is_file() and (not require_graph or (stage / "factor-graph.tsv").is_file()):

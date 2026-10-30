@@ -1572,45 +1572,24 @@ public class ByteCodeGraph {
 		return null;
 	}
 
+	/** 单测试执行必须走完整调用/返回解析，不能跳过RET@或只顺序解释指令。 */
 	public void parsetrace(String tracefilename, String testname, boolean testpass) {
-		this.predstack.clear();
-		this.testname = testname;
-		this.initmaps();
-		try (BufferedReader reader = new BufferedReader(new FileReader(tracefilename))) {
-			String t;
-			while ((t = reader.readLine()) != null) {
-				// System.err.println(t);
-				if (t.isEmpty() || t.startsWith("###"))
-					continue;
-				this.parseinfo = new ParseInfo(t);
-				// System.out.println(t);
-				// System.out.println(this.parseinfo.getvalue("lineinfo"));
-				String instname = this.parseinfo.getvalue("lineinfo");
-				// System.out.println(instname);
-				killPredStack(instname);
-				if (predataflowmap.get(instname).size() > 1) {
-					// System.out.println("add set" + branch_stores.get(instname));
-					Set<Integer> stores = branch_stores.get(instname);
-					// if (stores != null)
-					store_stack.push(stores);
-				}
-				// debugLogger.info(this.parseinfo.form);
-				Interpreter.map[this.parseinfo.form].buildtrace(this);
-				// System.out.println("After "+this.parseinfo.getvalue("lineinfo")+" preds "+
-				// predstack);
-			}
-			// after all lines are parsed, auto-assign oracle for the last defined var
-			// with test state(pass = true,fail = false)
-			if (auto_oracle) {
-				for (Node i : lastDefinedVar) {
-					i.observe(testpass);
-					if (debug_logger_switch)
-						graphLogger.writeln("Observe %s as %b", i.name, testpass);
-				}
-			}
-		} catch (IOException e) {
-			e.printStackTrace();
-		}
+        int split = testname.lastIndexOf('.');
+        if (split < 0) throw new IllegalArgumentException("test identity must include class and method");
+        TraceChunk chunk = new TraceChunk(testname.substring(0, split) + "::" + testname.substring(split + 1));
+        chunk.testpass = testpass;
+        try (BufferedReader reader = new BufferedReader(new FileReader(tracefilename))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.startsWith("opcode")) chunk.add(line);
+                else if (line.startsWith("###RET@")) chunk.add(line.substring(3));
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("cannot read trace: " + tracefilename, e);
+        }
+        chunk.prune(java.util.Collections.emptySet());
+        // parseChunk负责方法帧、调用参数、返回值及异常观测；严格传播解析错误。
+        parseChunk(chunk, new TraceChunk("static::init"));
 	}
 
 	private Set<String> visited_for_stores = new HashSet<>();

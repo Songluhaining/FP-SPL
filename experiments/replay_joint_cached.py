@@ -4,13 +4,14 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import sys
 from collections import defaultdict
 from dataclasses import asdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from cfp_spl.brfl_runtime import BrflRuntime, Execution
+from cfp_spl.brfl_runtime import BrflRuntime, Execution, run
 from cfp_spl.configurations import load_configurations
 from cfp_spl.domain import JavaTestCase, TestPair
 from cfp_spl.factor_graph import load_factor_graph
@@ -52,6 +53,19 @@ def main():
                     test = JavaTestCase(cls, method, Path('cached'), '', '')
                     execution = Execution('passed' if side == 'passing' else 'failed',
                                           stage / 'factor-graph.tsv', stage / 'test-run.log', None, None)
+                    # 重用的是原始轨迹，不重用旧解析器生成的错误依赖边。
+                    parse_dir = output / 'structures' / str(len(seen)) / side
+                    parse_dir.mkdir(parents=True, exist_ok=True)
+                    (parse_dir / 'infer.txt').write_text(','.join(['0.5'] * 10), encoding='ascii')
+                    structure_file = parse_dir / 'structure.tsv'
+                    cp = os.pathsep.join((str(runtime.classes), str(runtime.lib / '*')))
+                    parsed = run([str(runtime.java), '-cp', cp, 'ppfl.CounterfactualInferenceExport',
+                                  str((stage / 'trace/logs/mytrace').resolve()), str((stage / 'run.log').resolve()),
+                                  test.identity, 'PASS' if side == 'passing' else 'FAIL',
+                                  str(structure_file), '--structure-only'], parse_dir, parse_dir / 'parse.log')
+                    if parsed.returncode:
+                        raise RuntimeError(f'cached trace parse failed: {parse_dir}')
+                    execution = Execution(execution.outcome, structure_file, execution.log_path, None, None)
                     structure = load_factor_graph(execution.graph_path)
                     sides.append((config, test, execution, structure))
                     key = str(stage)
