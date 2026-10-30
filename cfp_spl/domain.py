@@ -38,7 +38,7 @@ class JavaTestCase:
 class TestPair:
     failing: JavaTestCase
     passing: JavaTestCase | None
-    provenance: Literal["exact", "similar", "model_selected", "generated", "missing"]
+    provenance: Literal["exact", "similar", "model_selected", "generated", "missing", "skipped_after_direct_evidence"]
     similarity: float
     oracle_similarity: float
     generation_request: Path | None = None

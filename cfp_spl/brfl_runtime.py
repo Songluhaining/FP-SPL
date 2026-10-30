@@ -12,10 +12,23 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .domain import Configuration, JavaTestCase
+from .feature_sources import load_feature_map
 
 
 PACKAGE = re.compile(r"\bpackage\s+([\w.]+)\s*;")
 ASSERT_FAILURE = re.compile(r"expected:<(.+?)> but was:<(.+?)>")
+
+
+def failure_signature(log: str) -> dict:
+    """JUnit报告中的异常类型及首个产品栈帧；不从opcode文本猜异常。"""
+    match = re.search(r"=>\s+([\w.$]+)(?::|\s|$)", log)
+    if not match:
+        return {}
+    tail = log[match.end():]
+    frame = re.search(r"^\s+([\w.$]+)\(([^():]+\.java):(\d+)\)", tail, re.MULTILINE)
+    return {"exception": match.group(1), "product_method": frame.group(1) if frame else None,
+            "line": int(frame.group(3)) if frame else None,
+            "assertion": any(x in match.group(1) for x in ("AssertionError", "AssertionFailedError", "ComparisonFailure"))}
 
 
 def run(command: list[str], cwd: Path, log: Path, timeout: int = 300) -> subprocess.CompletedProcess:
@@ -31,6 +44,7 @@ class Build:
     main: Path
     tests: Path
     product_classes: tuple[str, ...]
+    source_digest: str = ""
 
 
 @dataclass(frozen=True)
@@ -115,17 +129,19 @@ class BrflRuntime:
             source = path.read_text(encoding="utf-8", errors="replace")
             package = PACKAGE.search(source)
             classes.append((package.group(1) + "." if package else "") + path.stem)
-        return Build(main_out, test_out, tuple(classes))
+        digest = hashlib.sha256(b"".join(p.read_bytes() for p in [*main_sources, *test_sources])).hexdigest()
+        return Build(main_out, test_out, tuple(classes), digest)
 
     def execute(self, config: Configuration, test: JavaTestCase, output: Path,
                 build: Build, require_graph: bool = True) -> Execution:
         """执行一个测试；require_graph=False仍插桩，但跳过构图和推理。"""
-        method_stage = test.method_name if require_graph else test.method_name + ".outcome-only"
-        stage = output / "runs" / test.class_name.replace(".", "_") / method_stage
+        # Windows长路径会让Java日志目录无法清理；身份在status中保存，目录用短摘要。
+        run_id = hashlib.sha256((test.identity + test.full_source + build.source_digest).encode()).hexdigest()[:12]
+        stage = output / "runs" / run_id / ("graph" if require_graph else "outcome")
         cached_status = stage / "status.json"
-        if not require_graph and cached_status.is_file():
+        if cached_status.is_file() and (not require_graph or (stage / "factor-graph.tsv").is_file()):
             status = json.loads(cached_status.read_text(encoding="utf-8"))
-            return Execution(status["outcome"], None, stage / "test-run.log",
+            return Execution(status["outcome"], stage / "factor-graph.tsv" if require_graph else None, stage / "test-run.log",
                              status.get("expected"), status.get("actual"))
         if stage.exists():
             def tolerate_disappearing_trace(_function, _path, error):
@@ -167,7 +183,34 @@ class BrflRuntime:
         export_log = stage / "factor-inference.log"
         exported = run([str(self.java), "-cp", export_cp, "ppfl.CounterfactualInferenceExport",
                         str(source_dir), str(trace), oracle,
-                        "PASS" if outcome == "passed" else "FAIL", str(graph)], stage, export_log)
+                        "PASS" if outcome == "passed" else "FAIL", str(graph),
+                        "--structure-only"], stage, export_log)
         if exported.returncode:
             raise RuntimeError(f"BRFL因果推理失败：{export_log}")
         return Execution(outcome, graph, log, status["expected"], status["actual"])
+
+    def infer_joint(self, executions: list[tuple[Configuration, JavaTestCase, Execution]],
+                    output: Path) -> Path:
+        """各轨迹只有结构解析；在Java桥接中共享特征源码语句后统一推理。"""
+        output.mkdir(parents=True, exist_ok=True)
+        rows = []
+        for index, (config, test, execution) in enumerate(executions):
+            stage = execution.log_path.parent.resolve()
+            mapping = output / f"source-map-{index}.tsv"
+            feature_map = load_feature_map(config.variant_dir)
+            mapping.write_text("".join(f"{cls}#{line}\t{identity}\n"
+                                       for (cls, line), identity in sorted(feature_map.items())), encoding="utf-8")
+            rows.append("\t".join((f"e{index}:{config.name}",
+                                    str(stage / "trace" / "logs" / "mytrace"),
+                                    str(stage / "run.log"), test.identity,
+                                    "PASS" if execution.outcome == "passed" else "FAIL", str(mapping))))
+        manifest = output / "executions.tsv"
+        manifest.write_text("\n".join(rows) + "\n", encoding="utf-8")
+        (output / "infer.txt").write_text(",".join(["0.5"] * 10) + "\n", encoding="ascii")
+        graph = output / "joint-factor-graph.tsv"
+        cp = os.pathsep.join((str(self.classes), str(self.lib / "*")))
+        result = run([str(self.java), "-cp", cp, "ppfl.CounterfactualInferenceExport",
+                      "--joint", str(manifest), str(graph)], output, output / "joint-inference.log", timeout=300)
+        if result.returncode:
+            raise RuntimeError(f"联合构图推理失败：{output / 'joint-inference.log'}")
+        return graph

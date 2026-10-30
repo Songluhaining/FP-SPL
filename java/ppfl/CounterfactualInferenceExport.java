@@ -10,6 +10,10 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.LinkedHashMap;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 
 /** 构建并推断BRFL原生因子图，然后无损导出节点、因子、参数表和关联角色。 */
 public final class CounterfactualInferenceExport {
@@ -55,7 +59,11 @@ public final class CounterfactualInferenceExport {
     }
 
     public static void main(String[] args) throws Exception {
-        if (args.length != 5) {
+        if (args.length == 3 && args[0].equals("--joint")) {
+            joint(args[1], new File(args[2]));
+            return;
+        }
+        if (args.length != 5 && args.length != 6) {
             throw new IllegalArgumentException("sourceDir traceFile testName PASS|FAIL output");
         }
         File sourceDir = new File(args[0]);
@@ -85,8 +93,13 @@ public final class CounterfactualInferenceExport {
         graph.get_idom();
         graph.get_stores();
         graph.parsetrace(traceFile.getAbsolutePath(), testName, passed);
-        // 真正的概率推理入口：使用移植BRFL的循环信念传播实现。
-        graph.bp_inference();
+        // 统一模式下这里只解析轨迹，不计算单侧后验。
+        if (args.length == 5) graph.bp_inference();
+        export(graph, output);
+        WriterUtils.cleanup().run();
+    }
+
+    private static void export(ByteCodeGraph graph, File output) throws Exception {
 
         IdentityHashMap<Node, String> ids = new IdentityHashMap<Node, String>();
         int index = 0;
@@ -108,7 +121,8 @@ public final class CounterfactualInferenceExport {
             Node origin = (Node) field(Node.class, "stmt").get(node);
             out.write("VALUE\t" + id(node, ids) + "\t" + encode(node.getName()) + "\t"
                     + encode(origin == null ? "" : origin.getName()) + "\t" + encode(stackText) + "\t"
-                    + node.bp_getprob() + "\t" + (bool(node, "obs") ? "1" : "0") + "\n");
+                    + node.bp_getprob() + "\t" + (bool(node, "obs") ? "1" : "0") + "\t"
+                    + (bool(node, "obsvalue") ? "1" : "0") + "\n");
         }
         index = 0;
         for (FactorNode factor : graph.factornodes) {
@@ -127,6 +141,75 @@ public final class CounterfactualInferenceExport {
             if (uses != null) for (Node node : uses) incidence(out, factorId, node, "USE", ids);
         }
         out.close();
+    }
+
+    /** 独立解析各执行，统一静态语句身份后只推理一次。manifest每行：
+     * 执行标识、静态日志目录、轨迹、测试名、PASS/FAIL、源码映射文件。
+     */
+    @SuppressWarnings("unchecked")
+    private static void joint(String manifest, File output) throws Exception {
+        ByteCodeGraph merged = new ByteCodeGraph();
+        Map<String, StmtNode> shared = new LinkedHashMap<String, StmtNode>();
+        for (String row : Files.readAllLines(Paths.get(manifest), StandardCharsets.UTF_8)) {
+            String[] a = row.split("\t", -1);
+            if (a.length != 6) throw new IllegalArgumentException("invalid execution manifest");
+            Map<String, String> mapping = new LinkedHashMap<String, String>();
+            for (String line : Files.readAllLines(Paths.get(a[5]), StandardCharsets.UTF_8)) {
+                String[] pair = line.split("\t", -1);
+                mapping.put(pair[0], pair[1]);
+            }
+            ppfl.instrumentation.RuntimeFrame.resetFrames();
+            ByteCodeGraph local = new ByteCodeGraph();
+            local.setAutoOracle(true);
+            local.setTraceAllClassed(true);
+            File[] sources = new File(a[1]).listFiles();
+            if (sources == null) throw new IllegalArgumentException("missing source logs");
+            for (File source : sources) {
+                if (source.getName().endsWith(".source.log") && !source.getName().equals("traced.source.log"))
+                    local.parsesource(source.getAbsolutePath());
+            }
+            local.get_pre_idom(); local.find_loop(); local.get_idom(); local.get_stores();
+            local.parsetrace(a[2], a[3], a[4].equals("PASS"));
+            IdentityHashMap<Node, StmtNode> replacements = new IdentityHashMap<Node, StmtNode>();
+            for (StmtNode stmt : local.stmts) {
+                String raw = stmt.getName();
+                String[] parts = raw.split("#");
+                String runtimeClass = parts[0].split(":")[0].replace('/', '.');
+                String identity = parts.length > 1 ? mapping.get(runtimeClass + "#" + parts[1]) : null;
+                // 缺少特征映射的节点不跨执行合并，避免把测试或不同特征实现误合并。
+                if (identity == null) identity = "unmapped:" + a[0] + ":" + raw;
+                StmtNode canonical = shared.get(identity);
+                if (canonical == null) {
+                    canonical = new StmtNode(identity, stmt.form);
+                    shared.put(identity, canonical);
+                    merged.stmts.add(canonical);
+                }
+                replacements.put(stmt, canonical);
+            }
+            for (Node value : local.nodes) {
+                value.name = a[0] + ":" + value.name;
+                if (value.stmt != null) value.stmt = replacements.get(value.stmt);
+                merged.nodes.add(value);
+            }
+            for (FactorNode factor : local.factornodes) {
+                Node old = get(factor, "stmt");
+                StmtNode canonical = replacements.get(old);
+                if (canonical == null) throw new IllegalStateException("factor has unmapped statement");
+                field(FactorNode.class, "stmt").set(factor, canonical);
+                List<Node> all = get(factor, "allnodes");
+                if (all != null) for (int i = 0; i < all.size(); i++)
+                    if (replacements.containsKey(all.get(i))) all.set(i, replacements.get(all.get(i)));
+                List<Edge> edges = get(factor, "alledges");
+                for (Edge edge : edges) {
+                    StmtNode replacement = replacements.get(edge.getnode());
+                    if (replacement != null) { edge.setnode(replacement); replacement.add_edge(edge); }
+                }
+                merged.factornodes.add(factor);
+            }
+        }
+        if (merged.nodes.isEmpty() || merged.stmts.isEmpty()) throw new IllegalStateException("empty joint graph");
+        merged.bp_inference();
+        export(merged, output);
         WriterUtils.cleanup().run();
     }
 }

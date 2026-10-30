@@ -21,14 +21,27 @@ def load_feature_map(variant_dir: Path) -> FeatureMap:
         for package in root.findall(".//package"):
             package_name = package.get("name", "")
             for file_node in package.findall("file"):
-                class_name = Path(file_node.get("name", "")).stem
-                runtime_class = f"{package_name}.{class_name}" if package_name else class_name
+                # Clover的name可能是EmailSystem.Client（不是文件扩展名）。
+                # 对它调用Path.stem会错误截成EmailSystem并覆盖不同类的行映射。
+                file_path = file_node.get("path", "").replace("\\", "/")
+                name = file_node.get("name", "")
+                if file_path.endswith(".java"):
+                    class_name = Path(file_path).stem
+                    runtime_class = f"{package_name}.{class_name}" if package_name else class_name
+                elif name.endswith(".java"):
+                    class_name = Path(name.replace("\\", "/")).stem
+                    runtime_class = f"{package_name}.{class_name}" if package_name else class_name
+                else:
+                    runtime_class = name if "." in name else f"{package_name}.{name}" if package_name else name
                 for line in file_node.findall("line"):
                     number = line.get("num")
                     feature_class = line.get("featureClass")
                     feature_line = line.get("featureLineNum")
                     if number and feature_class and feature_line:
-                        mapping[(runtime_class, int(number))] = f"{feature_class}:{feature_line}"
+                        key, value = (runtime_class, int(number)), f"{feature_class}:{feature_line}"
+                        if key in mapping and mapping[key] != value:
+                            raise ValueError(f"冲突的特征源码映射：{key}，{mapping[key]} / {value}")
+                        mapping[key] = value
     return mapping
 
 

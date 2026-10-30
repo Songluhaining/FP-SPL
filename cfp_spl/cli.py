@@ -14,6 +14,7 @@ def parser() -> argparse.ArgumentParser:
     value.add_argument("--output", type=Path, required=True, help="实验输出目录")
     value.add_argument("--java-home", type=Path, required=True, help="Java 8开发工具包目录")
     value.add_argument("--version", help="只处理一个缺陷版本")
+    value.add_argument("--max-passing", type=int, default=0, help="过程验证时每版本只处理前若干通过配置；0表示全部")
     value.add_argument("--neighbors", type=int, default=1, help="至少选取的近邻数，边界距离并列项全部保留；默认选择所有并列最近项")
     value.add_argument("--similarity-threshold", type=float, default=0.55, help="已有测试的最低内容相似度")
     value.add_argument("--top-k", type=int, default=20, help="每条失败测试检查的高可疑语句数")
@@ -38,5 +39,6 @@ def main(argv: list[str] | None = None) -> int:
         deepseek_key_file=args.deepseek_api_key_file,
         deepseek_model=args.deepseek_model,
         deepseek_base_url=args.deepseek_base_url,
+        max_passing=args.max_passing,
     ).run(args.version, args.plan_only)
     return 0

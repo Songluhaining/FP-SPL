@@ -16,12 +16,25 @@ from typing import Callable
 
 from .configurations import feature_delta
 from .domain import Configuration, JavaTestCase, TestPair
-from .java_tests import ASSERTION, canonical_tokens, extract_tests, oracle_signature, test_similarity
+from .java_tests import ASSERTION, METHOD, _closing_brace, canonical_tokens, extract_tests, oracle_signature, test_similarity
+
+
+def _test_context(test: JavaTestCase, keep_test: bool = True) -> str:
+    """保留当前测试、导入、字段和辅助初始化，删除同类中无关的其他测试方法。
+
+    自动生成测试类可能有数百方法，整类发送会淹没实际故障上下文。
+    """
+    text = test.full_source
+    for match in reversed(list(METHOD.finditer(text))):
+        if not keep_test or match.group(1) != test.method_name:
+            end = _closing_brace(text, text.find("{", match.start())) + 1
+            text = text[:match.start()] + text[end:]
+    return text
 
 
 def _request_digest(payload: dict, model: str, endpoint: str) -> str:
     """输入、模型、服务或生成协议变化时，不复用旧模型响应。"""
-    raw = json.dumps(["validated-generation-v2", model, endpoint, payload],
+    raw = json.dumps(["joint-counterfactual-v3", model, endpoint, payload],
                      ensure_ascii=False, sort_keys=True).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
 
@@ -125,6 +138,8 @@ class DeepSeekClient:
             try:
                 with urllib.request.urlopen(request, timeout=self.timeout) as response:
                     envelope = json.loads(response.read().decode("utf-8"))
+                if envelope["choices"][0].get("finish_reason") in {"length", "content_filter"}:
+                    raise ValueError("模型输出被截断或过滤，不能作为完整测试")
                 content = envelope["choices"][0]["message"]["content"]
                 if not content:
                     raise ValueError("模型返回了空内容")
@@ -151,7 +166,8 @@ class DeepSeekClient:
             "你是Java测试工程师。请生成一个反事实JUnit测试，使它在两个软件产品配置中都能编译和执行，"
             "并保持给定失败测试的输入场景、可观察行为和判定条件。不得删除、放宽或反转判定条件；"
             "不得伪造产品状态；不得使用只存在于一侧的产品接口。只输出一个JSON对象，不要输出代码围栏或解释。"
-            "JSON必须包含class_name、method_name、java_source和rationale四个字符串字段。"
+            "可实现时JSON必须包含class_name、method_name、java_source和rationale四个字符串字段。"
+            "若A缺少对应功能、无法保持原故障判定目标，请返回not_applicable=true及rationale，禁止伪造测试。"
         )
         return self._request(payload, system,
                              "请根据以下JSON输入生成测试，并以JSON格式返回：", 12_000)
@@ -159,12 +175,25 @@ class DeepSeekClient:
     def select(self, payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         system = (
             "你是Java测试工程师。请判断配置A中的哪个已有JUnit测试与配置B中的失败测试具有反事实可比性。"
-            "可比测试必须保持相同输入场景、产品行为和判定目标；仅有相同方法名或少量词语重合不够。"
+            "可比测试必须保持可比较的输入场景、相同产品行为和判定目标；允许小幅输入差异。"
+            "必须检查被调用的产品方法语义。isReadable和isEncrypted等不同属性即使断言文本相同也不等价。"
+            "必须考虑完整测试类中的初始化、辅助方法及异常预期，不能仅看断言文本。"
             "如果候选均不等价，selected_identity必须为空字符串。只输出JSON对象，包含"
             "selected_identity、confidence和rationale三个字段。confidence取0到1。"
         )
         return self._request(payload, system,
                              "请从以下候选中选择反事实测试，并以JSON格式返回：", 2_000)
+
+    def review(self, payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+        return self._request(payload,
+            "你是独立的测试审查员。审查生成测试是否保留原失败测试的关键输入场景、被测行为和故障判定目标。"
+            "以original_failure_execution中的实际失败断言和调用为审查中心，允许省去无关特征的其他检查。"
+            "A也失败可能正是待识别的假通过，不能仅因A/B都会失败而拒绝有效测试。"
+            "原故障若在初始化中崩溃，保留同一初始化调用即可保留故障目标，原测试尚未执行的后续断言可省去。"
+            "允许适配特征接口差异，但不能绕开失败目标、伪造状态、削弱断言或强行制造异常。"
+            "只输出JSON，包含scenario_comparable、behavior_preserved、oracle_preserved、"
+            "no_shortcut四个布尔值以及rationale理由。不确定时返回false。",
+            "请逐项审查以下原测试、两侧产品和生成测试：", 3000)
 
 
 class CounterfactualTestGenerator:
@@ -179,6 +208,10 @@ class CounterfactualTestGenerator:
         self.deepseek_key_file = deepseek_key_file
         self.deepseek_model = deepseek_model
         self.deepseek_base_url = deepseek_base_url
+        self.failure_contexts: dict[tuple[str, str], dict] = {}
+
+    def failure_context(self, config: Configuration, test: JavaTestCase) -> dict:
+        return self.failure_contexts.get((str(config.variant_dir), test.identity), {})
 
     def select_existing(self, passing: Configuration, failing: Configuration,
                         failed_test: JavaTestCase, candidates: list[JavaTestCase],
@@ -199,9 +232,11 @@ class CounterfactualTestGenerator:
             "passing_configuration_A": passing.name,
             "failing_configuration_B": failing.name,
             "feature_delta": feature_delta(passing, failing),
+            "original_failure_execution": self.failure_context(failing, failed_test),
             "failed_test_in_B": {
                 "identity": failed_test.identity,
                 "body": failed_test.body,
+                "source": _test_context(failed_test),
                 "oracle_signature": sorted(oracle_signature(failed_test)),
             },
             "candidates_in_A": [{
@@ -211,6 +246,8 @@ class CounterfactualTestGenerator:
                 "lexical_similarity": similarity,
                 "oracle_similarity": oracle,
             } for candidate, similarity, oracle in ranked],
+            "candidate_class_sources": {candidate.class_name: _test_context(candidate, keep_test=False)
+                                         for candidate, _, _ in ranked},
             "response_schema": {
                 "selected_identity": "候选identity；没有合格候选时为空字符串",
                 "confidence": "0到1之间的数值",
@@ -267,10 +304,11 @@ class CounterfactualTestGenerator:
             "passing_configuration_A": passing.name,
             "failing_configuration_B": failing.name,
             "feature_delta": feature_delta(passing, failing),
+            "original_failure_execution": self.failure_context(failing, failed_test),
             "required_output_identity": {"class_name": class_name, "method_name": method_name},
             "failed_test_in_B": {
                 "identity": failed_test.identity,
-                "source": failed_test.full_source,
+                "source": _test_context(failed_test),
                 "body": failed_test.body,
                 "oracle_signature": sorted(oracle_signature(failed_test)),
             },
@@ -283,6 +321,9 @@ class CounterfactualTestGenerator:
                 "只使用配置A和配置B共同存在且签名兼容的产品接口",
                 "兼容Java 8，不使用外部新增依赖，不访问网络、文件系统、时间或随机源",
                 "测试必须具有确定性，不得捕获并忽略异常，不得用条件分支跳过断言",
+                "优先最小修改原测试的必要接口与初始化；禁止凭方法名猜测API，必须以两侧源码为依据",
+                "优先围绕original_failure_execution标明的实际失败断言及调用构造最小可比场景；可省去与该故障判定无关的其他特征检查，但不能换成另一属性或功能",
+                "若原故障是产品异常而非断言失败，保留触发该异常的产品调用与输入即可；不必保留根本未执行的无关断言，正常返回即为通过，异常逃逸即为失败",
             ],
             "response_schema": {
                 "class_name": class_name,
@@ -328,7 +369,7 @@ class CounterfactualTestGenerator:
         """最多三轮修复；validator返回真实编译/执行结果，有效才结束。
 
         无validator时仅完成源码结构校验，不能据此认定生成测试有效。
-        每轮请求/响应/验证均保留，修复不得改变原断言。
+        每轮请求/响应/验证均保留；非机械复制必须复核场景、行为及判定目标。
         """
         request_dir.mkdir(parents=True, exist_ok=True)
         stem = f"{failed_test.class_name.replace('.', '_')}.{failed_test.method_name}"
@@ -364,6 +405,9 @@ class CounterfactualTestGenerator:
                     ).complete(generation_payload)
                 response.write_text(json.dumps({**answer, "_metadata": metadata},
                                                ensure_ascii=False, indent=2), encoding="utf-8")
+                if answer.get("not_applicable") is True:
+                    return TestPair(failed_test, None, "missing", 0.0, 0.0, round_request,
+                                    "模型报告无法构造可比测试（不是阴性证明）：" + str(answer.get("rationale", "")))
                 try:
                     self._validate_answer(answer, payload)
                     source_path = (request_dir / "generated").joinpath(
@@ -374,17 +418,37 @@ class CounterfactualTestGenerator:
                     if len(cases) != 1 or cases[0].method_name != answer["method_name"]:
                         raise ValueError("生成结果必须且只能包含指定测试方法")
                     generated = cases[0]
-                    # 保守校验：逐个保留原断言表达式，连重复次数也不能减少。
-                    # 需要改写断言的情形暂不自动接受，避免修复时偷换判定条件。
+                    # 先拒绝空/恒真断言，再由独立模型审查语义而非断言字符串重合。
                     original = Counter(" ".join(canonical_tokens(x))
                                        for x in ASSERTION.findall(failed_test.body))
                     actual = Counter(" ".join(canonical_tokens(x))
                                      for x in ASSERTION.findall(generated.body))
-                    if not original or original != actual:
-                        raise ValueError("必须原样保留所有断言；无显式断言的测试暂不自动接受")
-                    if re.search(r"\b(?:catch|if|switch|return|throw|try)\b|\b(?:Assume|assume\w*|fail)\s*\(",
-                                 generated.body):
-                        raise ValueError("生成测试不得通过异常、提前退出或条件判断绕过原断言")
+                    signature = payload.get("original_failure_execution", {}).get("failure_signature", {})
+                    crash_oracle = bool(signature.get("exception") and not signature.get("assertion"))
+                    if ((not original or not actual) and not crash_oracle) or re.search(r"assertTrue\s*\(\s*true\s*\)|assertFalse\s*\(\s*false\s*\)", generated.body):
+                        raise ValueError("必须原样保留所有断言的判定目标；不得输出空断言或恒真断言")
+                    if re.search(r"\b(?:Assume|assume\w*)\s*\(", generated.body):
+                        raise ValueError("不得跳过测试")
+                    # 非机械复制由独立模型审查场景/行为/判定目标，不能只看文本断言重合。
+                    if canonical_tokens(generated.body) != canonical_tokens(failed_test.body):
+                        review_payload = {**payload, "generated_java_source": answer["java_source"]}
+                        review_digest = _request_digest(review_payload, self.deepseek_model,
+                                                        self.deepseek_base_url)
+                        review_file = request_dir / f"{stem}.{review_digest[:16]}.review.json"
+                        if review_file.is_file():
+                            review = json.loads(review_file.read_text(encoding="utf-8"))
+                        else:
+                            review_key = _read_api_key(self.deepseek_key_file)
+                            if not review_key:
+                                raise ValueError("非机械复制测试需要模型语义复核；未提供接口密钥")
+                            review, review_metadata = DeepSeekClient(
+                                review_key, self.deepseek_model, self.deepseek_base_url, self.timeout
+                            ).review(review_payload)
+                            review["_metadata"] = review_metadata
+                            review_file.write_text(json.dumps(review, ensure_ascii=False, indent=2), encoding="utf-8")
+                        required = ("scenario_comparable", "behavior_preserved", "oracle_preserved", "no_shortcut")
+                        if not all(review.get(key) is True for key in required):
+                            raise ValueError(f"语义复核未通过：{review.get('rationale', '')}")
                     validation = validator(generated) if validator else {
                         "valid": True, "scope": "structure-only-not-execution-validated"}
                 except Exception as exc:

@@ -35,4 +35,9 @@ public class RuntimeFrame {
 	}
 
 	private static Map<String, RuntimeFrame> framemap = new HashMap<>();
+
+	/** 每次独立执行的解析必须清空静态帧缓存，避免携带另一配置的运行值。 */
+	public static void resetFrames() {
+		framemap.clear();
+	}
 }

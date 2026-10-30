@@ -46,6 +46,7 @@ def load_factor_graph(path: Path) -> FactorGraph:
                     "name": decode(fields[2]), "origin": decode(fields[3]),
                     "stack_values": decode(fields[4]).split("|") if fields[4] else [],
                     "correctness": float(fields[5]), "observed": fields[6] == "1",
+                    "observed_value": fields[7] == "1" if len(fields) > 7 else None,
                 }
             elif kind == "FACTOR":
                 graph.factors[fields[1]] = {
