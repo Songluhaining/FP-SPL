@@ -16,6 +16,12 @@ def parser() -> argparse.ArgumentParser:
     value.add_argument("--similarity-threshold", type=float, default=0.55, help="已有测试的最低内容相似度")
     value.add_argument("--top-k", type=int, default=20, help="每条失败测试检查的高可疑语句数")
     value.add_argument("--generator-command", help="生成测试的外部命令；可用{request}和{response}占位符")
+    value.add_argument("--deepseek-api-key-file", type=Path,
+                       help="DeepSeek接口密钥文件；默认读取环境变量或仓库同级deepseek-api-key.txt")
+    value.add_argument("--deepseek-model", default="deepseek-chat",
+                       help="用于生成反事实测试的模型名称")
+    value.add_argument("--deepseek-base-url", default="https://api.deepseek.com",
+                       help="DeepSeek接口根地址")
     value.add_argument("--plan-only", action="store_true", help="只生成配置与测试配对计划，不插桩执行")
     return value
 
@@ -23,7 +29,11 @@ def parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     CounterfactualPipeline(
-        args.dataset, args.output, args.java_home, args.generator_command,
-        args.neighbors, args.similarity_threshold, args.top_k,
+        args.dataset, args.output, args.java_home,
+        generator_command=args.generator_command, neighbors=args.neighbors,
+        similarity_threshold=args.similarity_threshold, top_k=args.top_k,
+        deepseek_key_file=args.deepseek_api_key_file,
+        deepseek_model=args.deepseek_model,
+        deepseek_base_url=args.deepseek_base_url,
     ).run(args.version, args.plan_only)
     return 0

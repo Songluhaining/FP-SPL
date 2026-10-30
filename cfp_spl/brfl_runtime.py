@@ -33,7 +33,7 @@ class Build:
 @dataclass(frozen=True)
 class Execution:
     outcome: str
-    graph_path: Path
+    graph_path: Path | None
     log_path: Path
     expected: str | None
     actual: str | None
@@ -108,10 +108,20 @@ class BrflRuntime:
         return Build(main_out, test_out, tuple(classes))
 
     def execute(self, config: Configuration, test: JavaTestCase, output: Path,
-                build: Build) -> Execution:
-        stage = output / "runs" / test.class_name.replace(".", "_") / test.method_name
+                build: Build, require_graph: bool = True) -> Execution:
+        method_stage = test.method_name if require_graph else test.method_name + ".outcome-only"
+        stage = output / "runs" / test.class_name.replace(".", "_") / method_stage
+        cached_status = stage / "status.json"
+        if not require_graph and cached_status.is_file():
+            status = json.loads(cached_status.read_text(encoding="utf-8"))
+            return Execution(status["outcome"], None, stage / "test-run.log",
+                             status.get("expected"), status.get("actual"))
         if stage.exists():
-            shutil.rmtree(stage)
+            def tolerate_disappearing_trace(_function, _path, error):
+                if isinstance(error[1], FileNotFoundError):
+                    return
+                raise error[1]
+            shutil.rmtree(stage, onerror=tolerate_disappearing_trace)
         stage.mkdir(parents=True)
         (stage / "infer.txt").write_text(",".join(["0.5"] * 10) + "\n", encoding="ascii")
         oracle = test.identity
@@ -131,6 +141,12 @@ class BrflRuntime:
         trace = stage / "run.log"
         trace.write_text("\n".join(x for x in result.stdout.splitlines() if x.startswith(("opcode", "###"))) + "\n",
                          encoding="utf-8")
+        match = ASSERT_FAILURE.search(result.stdout)
+        status = {"configuration": config.name, "test": oracle, "outcome": outcome,
+                  "expected": match.group(1) if match else None, "actual": match.group(2) if match else None}
+        (stage / "status.json").write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
+        if not require_graph:
+            return Execution(outcome, None, log, status["expected"], status["actual"])
         source_dir = stage / "trace" / "logs" / "mytrace"
         if not source_dir.is_dir() or not any(source_dir.glob("*.source.log")):
             raise RuntimeError(f"插桩没有生成静态语句日志：{log}")
@@ -141,8 +157,4 @@ class BrflRuntime:
                         str(source_dir), str(trace), oracle, outcome.upper(), str(graph)], stage, export_log)
         if exported.returncode:
             raise RuntimeError(f"BRFL因果推理失败：{export_log}")
-        match = ASSERT_FAILURE.search(result.stdout)
-        status = {"configuration": config.name, "test": oracle, "outcome": outcome,
-                  "expected": match.group(1) if match else None, "actual": match.group(2) if match else None}
-        (stage / "status.json").write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
         return Execution(outcome, graph, log, status["expected"], status["actual"])

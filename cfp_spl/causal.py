@@ -83,14 +83,17 @@ def assess_pair(
     ]
     overlap = len(qualifying) / max(1, min(top_k, len(ranked)))
     gap = sum(x.posterior_gap for x in qualifying) / max(1, len(qualifying))
-    test_strength = {"exact": 1.0, "generated": 0.75, "similar": 0.65}.get(pair.provenance, 0.0)
+    test_strength = {"exact": 1.0, "model_selected": 0.80,
+                     "generated": 0.75, "similar": 0.65}.get(pair.provenance, 0.0)
     score = min(0.99, 0.35 * test_strength + 0.25 * pair.similarity + 0.25 * min(1.0, overlap * 5) + 0.15 * max(0.0, gap))
     reasons = []
     if qualifying:
         reasons.append(f"{len(qualifying)}条B侧高可疑语句在A中实际执行并位于结果因果路径")
     if not qualifying:
         reasons.append("没有语句同时满足源码存在、实际执行、因果可达和后验差异")
-    strong_test = pair.provenance == "exact" or (pair.provenance == "generated" and pair.oracle_similarity >= 0.8)
+    strong_test = pair.provenance == "exact" or (
+        pair.provenance in {"model_selected", "generated"} and pair.oracle_similarity >= 0.8
+    )
     if strong_test and len(qualifying) >= 2 and score >= 0.65:
         level = "strong_suspect"
     elif qualifying and score >= 0.4:

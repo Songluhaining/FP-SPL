@@ -34,11 +34,17 @@ def _serialize_assessment(value: PairAssessment) -> dict:
 class CounterfactualPipeline:
     def __init__(self, dataset: Path, output: Path, java_home: Path,
                  generator_command: str | None = None, neighbors: int = 1,
-                 similarity_threshold: float = 0.55, top_k: int = 20):
+                 similarity_threshold: float = 0.55, top_k: int = 20,
+                 deepseek_key_file: Path | None = None,
+                 deepseek_model: str = "deepseek-chat",
+                 deepseek_base_url: str = "https://api.deepseek.com"):
         self.dataset = dataset.resolve()
         self.output = output.resolve()
         self.runtime = BrflRuntime(self.output / "runtime", java_home.resolve())
-        self.generator = CounterfactualTestGenerator(generator_command)
+        self.generator = CounterfactualTestGenerator(
+            generator_command, deepseek_key_file=deepseek_key_file,
+            deepseek_model=deepseek_model, deepseek_base_url=deepseek_base_url,
+        )
         self.neighbors = neighbors
         self.similarity_threshold = similarity_threshold
         self.top_k = top_k
@@ -72,6 +78,11 @@ class CounterfactualPipeline:
             for config_b, distance in nearest_failing(config_a, configs, self.neighbors):
                 for failed_test in _failed_tests(config_b):
                     pair = pair_tests(failed_test, test_cache[config_a.name], self.similarity_threshold)
+                    if pair.passing is None:
+                        pair = self.generator.select_existing(
+                            config_a, config_b, failed_test, test_cache[config_a.name],
+                            out / "generation-requests" / config_a.name / config_b.name,
+                        )
                     if pair.passing is None:
                         pair = self.generator.generate(
                             config_a, config_b, failed_test,
@@ -107,11 +118,14 @@ class CounterfactualPipeline:
                 )
             return build_cache[config.name]
 
-        def execute(config: Configuration, test: JavaTestCase, work: Path, compiled):
+        def execute(config: Configuration, test: JavaTestCase, work: Path, compiled,
+                    require_graph: bool = True):
             source_digest = hashlib.sha1(test.full_source.encode("utf-8")).hexdigest()
-            key = (config.name, test.identity, source_digest, str(work))
+            key = (config.name, test.identity, source_digest, str(work), require_graph)
             if key not in execution_cache:
-                execution_cache[key] = self.runtime.execute(config, test, work, compiled)
+                execution_cache[key] = self.runtime.execute(
+                    config, test, work, compiled, require_graph=require_graph
+                )
             return execution_cache[key]
 
         for config_a, config_b, pair, row in jobs:
@@ -128,8 +142,11 @@ class CounterfactualPipeline:
                 else:
                     generated = pair.provenance == "generated"
                     if generated:
-                        work_b = out / "generated-builds" / config_b.name / config_a.name / pair.passing.method_name
-                        work_a = out / "generated-builds" / config_a.name / config_b.name / pair.passing.method_name
+                        generated_id = hashlib.sha1(
+                            f"{config_a.name}|{config_b.name}|{pair.passing.identity}".encode("utf-8")
+                        ).hexdigest()[:12]
+                        work_b = out / "g" / generated_id / "b"
+                        work_a = out / "g" / generated_id / "a"
                         build_b = self.runtime.compile_configuration(config_b, work_b, pair.passing.source_path)
                         build_a = self.runtime.compile_configuration(config_a, work_a, pair.passing.source_path)
                         failing_test = pair.passing
@@ -138,10 +155,38 @@ class CounterfactualPipeline:
                         work_a = out / "configurations" / config_a.name
                         build_b, build_a = build(config_b), build(config_a)
                         failing_test = pair.failing
-                    execution_b = execute(config_b, failing_test, work_b, build_b)
-                    if execution_b.outcome != "failed":
-                        raise RuntimeError("反事实测试没有在未通过配置B上复现失败")
-                    execution_a = execute(config_a, pair.passing, work_a, build_a)
+                    if generated:
+                        execution_b = execute(
+                            config_b, failing_test, work_b, build_b, require_graph=False
+                        )
+                        if execution_b.outcome != "failed":
+                            raise RuntimeError("生成的反事实测试没有在未通过配置B上复现失败")
+                        execution_a = execute(
+                            config_a, pair.passing, work_a, build_a, require_graph=False
+                        )
+                        if execution_a.outcome == "failed":
+                            assessment = assess_pair(
+                                config_a.name, config_b.name, pair, FactorGraph(), None,
+                                execution_a.outcome, config_a.variant_dir / "src",
+                                feature_maps[config_b.name], feature_maps[config_a.name],
+                                self.top_k,
+                            )
+                            assessments.append(assessment)
+                            continue
+                        execution_a = execute(config_a, pair.passing, work_a, build_a)
+                        try:
+                            execution_b = execute(config_b, failing_test, work_b, build_b)
+                        except RuntimeError:
+                            regular_build_b = build(config_b)
+                            execution_b = execute(
+                                config_b, pair.failing,
+                                out / "configurations" / config_b.name, regular_build_b,
+                            )
+                    else:
+                        execution_b = execute(config_b, failing_test, work_b, build_b)
+                        if execution_b.outcome != "failed":
+                            raise RuntimeError("反事实测试没有在未通过配置B上复现失败")
+                        execution_a = execute(config_a, pair.passing, work_a, build_a)
                     assessment = assess_pair(
                         config_a.name, config_b.name, pair,
                         load_factor_graph(execution_b.graph_path),
