@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from cfp_spl.domain import Configuration, JavaTestCase
-from cfp_spl.generator import CounterfactualTestGenerator, DeepSeekClient, _read_api_key
+from cfp_spl.generator import CounterfactualTestGenerator, DeepSeekClient, _read_api_key, _test_context
 
 
 def _configuration(root: Path, name: str, source: str) -> Configuration:
@@ -163,3 +163,16 @@ def test_changed_assertion_is_rejected_before_execution(tmp_path, monkeypatch):
         a, b, failed, tmp_path / "requests", validator=must_not_execute, max_rounds=1)
     assert pair.passing is None
     assert "原样保留所有断言" in pair.rationale
+
+
+def test_context_keeps_setup_and_helpers_but_removes_unrelated_tests(tmp_path):
+    source = """public class T {
+    @Before public void setup(){ init(); }
+    private void init(){ }
+    @Test public void target(){ check(); }
+    @Test public void other(){ otherCheck(); }
+    }"""
+    case = JavaTestCase("T", "target", tmp_path / "T.java", "check();", source)
+    focused = _test_context(case)
+    assert "setup()" in focused and "init()" in focused and "target()" in focused
+    assert "otherCheck()" not in focused
