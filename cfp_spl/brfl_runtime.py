@@ -1,3 +1,5 @@
+"""管理移植的BRFL：构建代理、javac -g重编译、插桩执行、导出带后验的图。"""
+
 from __future__ import annotations
 
 import json
@@ -56,6 +58,7 @@ class BrflRuntime:
                 raise FileNotFoundError(path)
 
     def build_brfl(self) -> None:
+        """从本仓库vendor目录编译代理及导出桥接程序，不调用原BRFL仓库。"""
         bridge_class = self.classes / "ppfl" / "CounterfactualInferenceExport.class"
         if self.agent.is_file() and bridge_class.is_file():
             return
@@ -81,6 +84,7 @@ class BrflRuntime:
 
     def compile_configuration(self, config: Configuration, output: Path,
                               extra_test: Path | None = None) -> Build:
+        """保留调试行号重编译产品与测试；extra_test为可选的生成测试源码。"""
         main_out, test_out = output / "build" / "main", output / "build" / "test"
         main_sources = sorted((config.variant_dir / "src").rglob("*.java"))
         test_sources = sorted((config.variant_dir / "test").rglob("*.java"))
@@ -109,6 +113,7 @@ class BrflRuntime:
 
     def execute(self, config: Configuration, test: JavaTestCase, output: Path,
                 build: Build, require_graph: bool = True) -> Execution:
+        """执行一个测试；require_graph=False仍插桩，但跳过构图和推理。"""
         method_stage = test.method_name if require_graph else test.method_name + ".outcome-only"
         stage = output / "runs" / test.class_name.replace(".", "_") / method_stage
         cached_status = stage / "status.json"
@@ -123,6 +128,7 @@ class BrflRuntime:
                 raise error[1]
             shutil.rmtree(stage, onerror=tolerate_disappearing_trace)
         stage.mkdir(parents=True)
+        # 当前固定写入10个0.5参数，尚未接入频谱先验或区域张量推理。
         (stage / "infer.txt").write_text(",".join(["0.5"] * 10) + "\n", encoding="ascii")
         oracle = test.identity
         cp = os.pathsep.join((str(build.main), str(build.tests), str(self.agent), str(self.lib / "*")))

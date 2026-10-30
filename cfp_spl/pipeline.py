@@ -1,3 +1,9 @@
+"""识别主流程：配置近邻 → 测试配对 → 重编译执行 → 因果证据 → 配置排序。
+
+本模块只使用原始通过/失败结果，不读取真假通过评价标签。
+注意：当前实现分别对A、B取图推理，然后比较后验；并非联合因子图。
+"""
+
 from __future__ import annotations
 
 import csv
@@ -32,6 +38,7 @@ def _serialize_assessment(value: PairAssessment) -> dict:
 
 
 class CounterfactualPipeline:
+    """组织各模块；人工检查算法时建议先读 _run_version。"""
     def __init__(self, dataset: Path, output: Path, java_home: Path,
                  generator_command: str | None = None, neighbors: int = 1,
                  similarity_threshold: float = 0.55, top_k: int = 20,
@@ -50,6 +57,10 @@ class CounterfactualPipeline:
         self.top_k = top_k
 
     def run(self, version_name: str | None = None, plan_only: bool = False) -> dict:
+        """处理一个或全部缺陷版本，将各版本计数写入 summary.json。
+
+        plan_only仅跳过Java执行，配对阶段仍可能调用模型和生成测试。
+        """
         self.output.mkdir(parents=True, exist_ok=True)
         versions = [self.dataset / version_name] if version_name else [
             p for p in sorted(self.dataset.iterdir()) if (p / "config.report.csv.done").is_file()
@@ -67,12 +78,15 @@ class CounterfactualPipeline:
         return summaries
 
     def _run_version(self, version: Path, plan_only: bool) -> dict:
+        """一个缺陷版本内完成配对、执行和排序，各配对异常单独记录。"""
         out = self.output / version.name
         out.mkdir(parents=True, exist_ok=True)
         configs = load_configurations(version)
         passing = [c for c in configs if c.outcome == "passed"]
         test_cache = {c.name: discover_tests(c.variant_dir) for c in configs}
         feature_maps = {c.name: load_feature_map(c.variant_dir) for c in configs}
+        # 第一阶段：只以原本通过配置A为候选，寻找最近失败配置B及其失败测试。
+        # 顺序为确定性匹配、模型选择、模型生成；已有相似匹配会直接被接受。
         plan, jobs = [], []
         for config_a in passing:
             for config_b, distance in nearest_failing(config_a, configs, self.neighbors):
@@ -107,6 +121,7 @@ class CounterfactualPipeline:
         if plan_only:
             return {"passing_configurations": len(passing), "pairs": len(plan), "executed": 0}
 
+        # 第二阶段：按配对实际执行。缓存仅避免本次运行中重复编译和重复取图。
         assessments, errors = [], []
         build_cache = {}
         execution_cache = {}
@@ -142,6 +157,7 @@ class CounterfactualPipeline:
                 else:
                     generated = pair.provenance == "generated"
                     if generated:
+                        # 生成测试需在同一源码下分别对A/B重新编译；短目录避免Windows路径过长。
                         generated_id = hashlib.sha1(
                             f"{config_a.name}|{config_b.name}|{pair.passing.identity}".encode("utf-8")
                         ).hexdigest()[:12]
@@ -156,6 +172,8 @@ class CounterfactualPipeline:
                         build_b, build_a = build(config_b), build(config_a)
                         failing_test = pair.failing
                     if generated:
+                        # 先验证执行结果；B必须失败。A也失败时直接形成漏检证据，
+                        # 不再依赖因子图导出是否成功。这里仍会加载插桩代理。
                         execution_b = execute(
                             config_b, failing_test, work_b, build_b, require_graph=False
                         )
@@ -177,6 +195,8 @@ class CounterfactualPipeline:
                         try:
                             execution_b = execute(config_b, failing_test, work_b, build_b)
                         except RuntimeError:
+                            # 兼容回退：生成测试的B图失败时使用原失败测试的B图。
+                            # 此时A/B图来自不同测试，人工审查应关注其可比性。
                             regular_build_b = build(config_b)
                             execution_b = execute(
                                 config_b, pair.failing,
@@ -196,6 +216,7 @@ class CounterfactualPipeline:
                     )
                 assessments.append(assessment)
             except Exception as exc:
+                # 运行错误不形成有效阴性证据；ranking中无证据配置仍会显示证据不足。
                 errors.append({**row, "error": str(exc), "traceback": traceback.format_exc()})
         assessment_rows = [_serialize_assessment(x) for x in assessments]
         (out / "pair-assessments.json").write_text(
@@ -208,6 +229,7 @@ class CounterfactualPipeline:
 
     @staticmethod
     def _write_ranking(path: Path, passing: list[Configuration], assessments: list[PairAssessment]) -> None:
+        """按证据等级、最佳配对分数排序；多个配对不做概率融合。"""
         by_config: dict[str, list[PairAssessment]] = {c.name: [] for c in passing}
         for item in assessments:
             by_config[item.passing_configuration].append(item)

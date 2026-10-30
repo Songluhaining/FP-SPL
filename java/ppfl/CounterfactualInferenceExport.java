@@ -64,6 +64,7 @@ public final class CounterfactualInferenceExport {
         boolean passed = "PASS".equalsIgnoreCase(args[3]);
         File output = new File(args[4]);
 
+        // 每次调用只接收一个测试执行轨迹；当前不合并A/B或多测试证据。
         ByteCodeGraph graph = new ByteCodeGraph();
         graph.setAutoOracle(true);
         graph.setTraceAllClassed(true);
@@ -79,6 +80,7 @@ public final class CounterfactualInferenceExport {
         graph.get_idom();
         graph.get_stores();
         graph.parsetrace(traceFile.getAbsolutePath(), testName, passed);
+        // 真正的概率推理入口：使用移植BRFL的循环信念传播实现。
         graph.bp_inference();
 
         IdentityHashMap<Node, String> ids = new IdentityHashMap<Node, String>();

@@ -1,3 +1,5 @@
+"""根据两侧图的已计算后验提取证据；本模块不训练模型，也不执行概率推理。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -32,6 +34,10 @@ def assess_pair(
     min_failing_suspiciousness: float = 0.55,
     min_gap: float = 0.15,
 ) -> PairAssessment:
+    """给单个A/B测试对分级，阈值和加权分数均为人工规则。
+
+    分数只用于排序，不是经校准的假通过概率；执行可达关系也不等于干预证明。
+    """
     if passing_outcome == "failed":
         return PairAssessment(
             passing_config, failing_config, pair.failing.identity,
@@ -47,6 +53,7 @@ def assess_pair(
         )
     failing_feature_map = failing_feature_map or {}
     passing_feature_map = passing_feature_map or {}
+    # 用特征源码身份跨配置对齐；同一身份多次出现时取最高可疑度。
     failed_by_location, passed_by_location = statement_index(failing_graph), statement_index(passing_graph)
     failed_index = {}
     for stmt in failed_by_location.values():
@@ -76,6 +83,7 @@ def assess_pair(
                 identity in passing_cone,
             )
         )
+    # 源码存在、A中执行、结果路径可达、B可疑度和A/B差值必须同时满足。
     qualifying = [
         x for x in evidence
         if x.failing_suspiciousness >= min_failing_suspiciousness
@@ -83,6 +91,7 @@ def assess_pair(
     ]
     overlap = len(qualifying) / max(1, min(top_k, len(ranked)))
     gap = sum(x.posterior_gap for x in qualifying) / max(1, len(qualifying))
+    # 这些权重没有通过真假标签学习；模型的自报置信度也不作为后验概率。
     test_strength = {"exact": 1.0, "model_selected": 0.80,
                      "generated": 0.75, "similar": 0.65}.get(pair.provenance, 0.0)
     score = min(0.99, 0.35 * test_strength + 0.25 * pair.similarity + 0.25 * min(1.0, overlap * 5) + 0.15 * max(0.0, gap))

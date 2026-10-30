@@ -1,3 +1,5 @@
+"""解析运行参数并启动识别流程；算法本身在 pipeline.py 中。"""
+
 from __future__ import annotations
 
 import argparse
@@ -27,6 +29,7 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """可在调试器中从这里开始，argv=None 时读取终端参数。"""
     args = parser().parse_args(argv)
     CounterfactualPipeline(
         args.dataset, args.output, args.java_home,
