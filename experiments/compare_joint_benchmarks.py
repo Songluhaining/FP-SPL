@@ -21,7 +21,14 @@ def compare(root, baseline, system, clap_file=None):
     truth = read(baseline)
     clap = {(r['version'], r['configuration']): r for r in read(clap_file)} if clap_file else {}
     available = {}
+    checkpoint = root / 'benchmark-summary.json'
+    allowed = None
+    if checkpoint.is_file():
+        allowed = {name for name, record in json.loads(checkpoint.read_text(encoding='utf-8')).items()
+                   if record.get('status') == 'complete'}
     for file in sorted(root.glob('*/ranking.csv')):
+        if allowed is not None and file.parent.name not in allowed:
+            continue
         for row in read(file):
             available[(file.parent.name, row['configuration'])] = row
     completed = set()
