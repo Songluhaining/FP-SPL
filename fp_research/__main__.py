@@ -6,6 +6,7 @@ import sys
 
 STAGES={
     "inventory":"inventory",
+    "latent-fault":"latent_fault",
     "group-and-pair":"pairing",
     "infer":"traced_graphs",
     "fit":"fit",
