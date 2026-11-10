@@ -7,8 +7,8 @@ import xml.etree.ElementTree as ET
 from .inventory import records, SYSTEMS
 
 
-def ground_truth(data):
-    for system, relative in SYSTEMS.items():
+def ground_truth(data, systems=SYSTEMS):
+    for system, relative in systems.items():
         for version in sorted(data.joinpath(*relative).glob("_MultipleBugs_*")):
             lines=(version/(version.name+".mutant.log")).read_text(encoding="utf8").splitlines()
             faults=set()
@@ -27,7 +27,7 @@ def ground_truth(data):
                         hit |= any(int(line.get(attr,0))>0 for attr in ("count","truecount","falsecount"))
                 yield dict(system=system,version=version.name,configuration=record["configuration"],
                            label=int(present),executed_label=int(hit),
-                           base=int(all(k.split(".",1)[0] in {"BankAccount","Base"} for k in faults)))
+                           base=int(all(k.split(".",1)[0] in {"BankAccount","Base","ExamDB"} for k in faults)))
 
 
 if __name__=="__main__":

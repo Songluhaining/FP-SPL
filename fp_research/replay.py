@@ -14,6 +14,8 @@ from .runtime import LIB,command
 from .test_sources import filtered
 
 ROOT=Path(__file__).resolve().parents[1]
+REFERENCE_PROJECTS={"bank":"BankAccountTP","email":"Email-FH-JML",
+                    "elevator":"Elevator-FH-JML","examdb":"ExamDB-FH-JML"}
 
 
 def compile_sources(javac,sources,directory,classpath):
@@ -30,7 +32,7 @@ def security_key(paths):
 
 
 def reference_build(features,system,projects,tool,cache,home):
-    original=projects/("BankAccountTP" if system=="bank" else "Email-FH-JML")/"features"
+    original=projects/REFERENCE_PROJECTS[system]/"features"
     selected=[original/f for f in features]
     key=security_key([tool,*[p for feature in selected for p in feature.rglob("*.java")]])
     root=cache/"reference"/key
@@ -119,7 +121,7 @@ def replay_version(job):
             cfg,test=key.split("/")
             cls=test.rsplit(".",1)[0].rsplit(".",1)[-1]
             semantic_inputs.extend(sorted((source/"variants"/cfg/"test").rglob(cls+"*.java")))
-        clean=projects/("BankAccountTP" if system=="bank" else "Email-FH-JML")/"features"
+        clean=projects/REFERENCE_PROJECTS[system]/"features"
         for feature in row["features"]:
             semantic_inputs.extend((clean/feature).rglob("*.java"))
         fingerprint=hashlib.sha256((security_key(semantic_inputs)+json.dumps(keys)+str(home)).encode()).hexdigest()

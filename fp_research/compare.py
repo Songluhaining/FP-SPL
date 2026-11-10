@@ -24,14 +24,14 @@ def load_features(version,method):
     return names,observations,table
 
 
-def run(root,repo,method,truth,target,only=None):
+def run(root,repo,method,truth,target,only=None,systems=("bank", "email"),extra_splits=()):
     sys.path.insert(0,str(repo.resolve()))
     if method=="CLAP":
         import PassingVariants_Classification as implementation
     else:
         from fp_detection.PUBaggingLearning import PUBaggingLearning
     predictions=[]
-    for name,training,testing in splits(root):
+    for name,training,testing in [*splits(root,systems), *extra_splits]:
         if only and not name.startswith(only+"-fold"):
             continue
         x,y=[],[]
@@ -54,6 +54,13 @@ def run(root,repo,method,truth,target,only=None):
             test_tables.append(table.loc[keep])
             ids_all.extend((v.parent.name,v.name,i) for i,k in zip(ids,keep) if k)
         test=pd.concat(test_tables)[X.columns].to_numpy()
+        if method=="CLAP" and len(set(y))==1:
+            # 原版二分类器无法在单类训练集上拟合。保留留出配置与缺失分数。
+            for s,v,c in ids_all:
+                predictions.append(dict(system=s,version=v,configuration=c,split=name,method=method,
+                                        score=None,prediction=0,status="insufficient"))
+            print(name,method,"single_training_class",len(test),flush=True)
+            continue
         if method=="CLAP":
             # 发布实现只输出准确率；截取它实际训练的模型进行折外打分，替换依赖真值的打印。
             captured=[]
