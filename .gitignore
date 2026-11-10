@@ -1,0 +1,26 @@
+bin/
+*.class
+*.png
+test/trace/patterns/
+test/trace/logs
+configs/*.launch
+/refs/
+target/
+/.vscode/
+/result/
+*.pyc
+trace/runtimelog/
+d4j_resources/metadata_cached/*
+trace/logs/mytrace/ProbGraph*
+trace/logs/*
+abstract_message/*
+extract_message/*
+/trace/patterns/*
+
+# Local LLM credentials / settings -- never commit these.
+llm_config.json
+.env
+
+# Local run artefacts
+replay_pid*.log
+.tmp_file_needed_by_mock_of_FileHandler*

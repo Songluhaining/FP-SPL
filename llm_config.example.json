@@ -1,0 +1,22 @@
+{
+  "_comment": "Copy this file to llm_config.json and fill in your own values. llm_config.json is git-ignored, so your key never gets committed. Every field can also be overridden by an environment variable (BRFL_LLM_PROVIDER / BRFL_LLM_MODEL / BRFL_LLM_BASE_URL / BRFL_LLM_API_KEY / BRFL_LLM_TEMPERATURE / BRFL_LLM_TOP_K / BRFL_LLM_TIMEOUT).",
+
+  "_provider_help": "'dashscope' = Aliyun DashScope native SDK (base_url is ignored). 'openai' = any OpenAI-compatible /chat/completions endpoint (OpenAI, DeepSeek, DashScope compatible-mode, vLLM, Ollama, ...), in which case base_url is required.",
+  "provider": "dashscope",
+
+  "model": "qwen-plus",
+
+  "_base_url_examples": [
+    "https://api.openai.com/v1",
+    "https://api.deepseek.com/v1",
+    "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "http://localhost:11434/v1"
+  ],
+  "base_url": "",
+
+  "api_key": "PUT-YOUR-OWN-API-KEY-HERE",
+
+  "temperature": 0.1,
+  "top_k": 5,
+  "timeout": 60
+}

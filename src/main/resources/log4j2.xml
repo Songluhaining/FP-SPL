@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- xml file for log4j2 -->
+<Configuration status="WARN">
+  <Appenders>
+    <Console name="Console" target="SYSTEM_OUT">
+      <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n" />
+    </Console>
+    <Console name="DebugConsole" target="SYSTEM_ERR">
+      <PatternLayout pattern="%msg%n" />
+    </Console>
+
+    <!-- <RandomAccessFile name="TraceAppender_simple" fileName="trace/logs/mytrace/all.log" Append="false" immediateFlush="false" bufferSize="1048576">
+      <PatternLayout pattern="%msg" />
+    </RandomAccessFile> -->
+
+    <RandomAccessFile name="SourceAppender_simple" fileName="trace/logs/mytrace/all.source.log" Append="false" immediateFlush="false" bufferSize="1048576">
+      <PatternLayout pattern="%msg" />
+    </RandomAccessFile>
+
+    <Routing name="TraceAppender" ignoreExceptions="false">
+      <Routes pattern="${ctx:logfile}">
+        <Route>
+          <RandomAccessFile name="File" fileName="trace/logs/mytrace/${ctx:logfile}.log" Append="false" immediateFlush="false">
+            <PatternLayout>
+              <pattern>%msg</pattern>
+            </PatternLayout>
+          </RandomAccessFile>
+        </Route>
+      </Routes>
+      <!-- Created appender TTL -->
+      <!-- <IdlePurgePolicy timeToLive="15" timeUnit="minutes" /> -->
+    </Routing>
+    <Routing name="SourceAppender" ignoreExceptions="false">
+      <Routes pattern="${ctx:sourcefile}">
+        <Route>
+          <RandomAccessFile name="File" fileName="trace/logs/mytrace/${ctx:sourcefile}.source.log" Append="false" immediateFlush="false">
+            <PatternLayout>
+              <pattern>%msg</pattern>
+            </PatternLayout>
+          </RandomAccessFile>
+        </Route>
+      </Routes>
+      <!-- Created appender TTL -->
+      <!-- <IdlePurgePolicy timeToLive="15" timeUnit="minutes" /> -->
+    </Routing>
+    <Routing name="ResultAppender" ignoreExceptions="false">
+      <Routes pattern="${ctx:resultfile}">
+        <Route>
+          <File name="File" fileName="trace/logs/mytrace/${ctx:resultfile}.result.log" Append="false">
+            <PatternLayout>
+              <pattern>%msg%n</pattern>
+            </PatternLayout>
+          </File>
+        </Route>
+      </Routes>
+      <!-- Created appender TTL -->
+      <!-- <IdlePurgePolicy timeToLive="15" timeUnit="minutes" /> -->
+    </Routing>
+    <Routing name="GraphAppender" ignoreExceptions="false">
+      <Routes pattern="${ctx:graphfile}">
+        <Route>
+          <File name="File" fileName="trace/logs/mytrace/${ctx:graphfile}.graph.log" Append="false">
+            <PatternLayout>
+              <pattern>%msg%n</pattern>
+            </PatternLayout>
+          </File>
+        </Route>
+      </Routes>
+      <!-- Created appender TTL -->
+      <!-- <IdlePurgePolicy timeToLive="15" timeUnit="minutes" /> -->
+    </Routing>
+  </Appenders>
+  <Loggers>
+    <Root level="trace">
+      <!-- AppenderRef ref="Console" /!-->
+    </Root>
+    <Logger name="ResultLogger" level="trace" additivity="false">
+      <AppenderRef ref="ResultAppender" />
+    </Logger>
+    <Logger name="GraphLogger" level="warn" additivity="false">
+      <AppenderRef ref="GraphAppender" />
+    </Logger>
+    <Logger name="Debugger" level="warn" additivity="false">
+      <AppenderRef ref="DebugConsole" />
+    </Logger>
+    <Logger name="TraceTransformer" level="trace" additivity="false">
+      <AppenderRef ref="Console" />
+    </Logger>
+    <Logger name="PPFL_LOGGER" level="trace" additivity="false">
+      <AppenderRef ref="TraceAppender" />
+    </Logger>
+    <Logger name="PPFL_LOGGER_SOURCE" level="warn" additivity="false">
+      <AppenderRef ref="SourceAppender" />
+    </Logger>
+  </Loggers>
+</Configuration>
