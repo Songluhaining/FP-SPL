@@ -78,10 +78,11 @@ def run(root,output,selected=None):
                 heldout+=len(pred)
         source_files=[Path(__file__),Path(__file__).with_name("detection.py"),Path(__file__).with_name("folds.py")]
         fingerprint=hashlib.sha256(b"".join(f.read_bytes() for f in source_files)).hexdigest()
+        validation_error=brier_sum/heldout if heldout else None
         atomic_json(dest/"fold.json",dict(train=[p.as_posix() for p in train],test=[p.as_posix() for p in test],
-                    train_bags=len(labels),held_out_bags=heldout,brier=brier_sum/max(1,heldout),
+                    train_bags=len(labels),held_out_bags=heldout,brier=validation_error,
                     implementation_sha256=fingerprint,seed=42))
-        print(name,len(labels),heldout,brier_sum/max(1,heldout),flush=True)
+        print(name,len(labels),heldout,validation_error,flush=True)
 
 
 if __name__=="__main__":

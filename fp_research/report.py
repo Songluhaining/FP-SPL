@@ -105,6 +105,15 @@ def replay_table(root,truth,output):
             eligible={x for strategy in ("model","random","coverage") for x in plan.get(strategy,[])}
             if eligible!=set(results):
                 raise ValueError(f"补测执行与已选候选不符 {key}")
+            if any(len(choice)!=len(set(choice)) or len(choice)>min(5,plan.get("pool",0))
+                   for choice in (plan.get(k,[]) for k in ("model","random","coverage"))):
+                raise ValueError(f"补测名额或候选唯一性异常 {key}")
+            for outcome in results.values():
+                if outcome["status"]=="confirmed" and not (
+                    outcome["reference"][0]=="passed" and outcome["first"][0]=="assertion"
+                    and outcome["first"]==outcome["second"]
+                ):
+                    raise ValueError(f"确认记录缺少双次独立复现 {key}")
             for strategy in ("model","random","coverage"):
                 for k in (1,3,5):
                     xs=plan.get(strategy,[])[:k]
@@ -114,7 +123,7 @@ def replay_table(root,truth,output):
                         compile_errors=statuses.count("compile_error"),
                         reference_checks=sum(s!="compile_error" for s in statuses),
                         target_checks=sum("first" in results[x] for x in xs)+sum(results[x].get("second") is not None for x in xs),
-                        timeouts=sum("timeout" in s for s in statuses)))
+                        timeouts=sum(results[x].get("status")=="reference_timeout" or any(results[x].get(at) and results[x][at][0]=="timeout" for at in ("first","second")) for x in xs)))
             for x,e in results.items():
                 receipts.append(dict(system=system,version=version,configuration=c,donor=x,**e))
     if seen!=truth_keys:
