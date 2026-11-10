@@ -34,5 +34,9 @@ public class RuntimeFrame {
 		return framemap.get(id);
 	}
 
+	public static void resetFrames() {
+		framemap.clear();
+	}
+
 	private static Map<String, RuntimeFrame> framemap = new HashMap<>();
 }

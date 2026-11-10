@@ -1572,6 +1572,25 @@ public class ByteCodeGraph {
 		return null;
 	}
 
+	public void parseIndependentTrace(String tracefilename, String testname, boolean testpass) {
+        int split = testname.lastIndexOf('.');
+        if (split < 0) throw new IllegalArgumentException("test identity must include class and method");
+        TraceChunk chunk = new TraceChunk(testname.substring(0, split) + "::" + testname.substring(split + 1));
+        chunk.testpass = testpass;
+        try (BufferedReader reader = new BufferedReader(new FileReader(tracefilename))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.startsWith("opcode")) chunk.add(line);
+                else if (line.startsWith("###RET@")) chunk.add(line.substring(3));
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("cannot read trace: " + tracefilename, e);
+        }
+        chunk.prune(java.util.Collections.emptySet());
+        // parseChunk负责方法帧、调用参数、返回值及异常观测；严格传播解析错误。
+        parseChunk(chunk, new TraceChunk("static::init"));
+	}
+
 	public void parsetrace(String tracefilename, String testname, boolean testpass) {
 		this.predstack.clear();
 		this.testname = testname;
