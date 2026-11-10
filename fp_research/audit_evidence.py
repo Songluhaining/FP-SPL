@@ -42,6 +42,7 @@ def verify(root,models,out,original=None,masked=None):
     out.mkdir(parents=True,exist_ok=True)
     stages=[]
     folds=[]
+    unavailable=[]
     with gzip.open(out/"groups.jsonl.gz","wt",encoding="utf8") as archive:
         for path in sorted(root.glob("*/*/inventory.json")):
             v=path.parent
@@ -69,6 +70,9 @@ def verify(root,models,out,original=None,masked=None):
                     if not record["scores"] or not all(math.isfinite(s) and 0<=s<=1 for s in record["scores"].values()):
                         raise ValueError("图后验异常")
                     ok+=1
+                if record["status"]!="ok":
+                    unavailable.append(dict(system=sys,version=v.name,group=group,status=record["status"],
+                        failures=len(ids),controls=len(expected)-len(ids),reason=record.get("reason","no mapped statements")))
                 ordinary={k:sem.get("locations",{}).get(k) for k in ids}
                 archive.write(json.dumps(dict(system=sys,version=v.name,group=group,ordinary_runs=ordinary,
                     used_in_posterior=sorted(expected) if record["status"]=="ok" else [],**record),ensure_ascii=False)+"\n")
@@ -81,6 +85,10 @@ def verify(root,models,out,original=None,masked=None):
                 check_masked(original.joinpath(*SYSTEMS[sys],v.name),masked.joinpath(*SYSTEMS[sys],v.name),rows,
                              json.loads((v/"construction.json").read_text(encoding="utf8")))
     save_rows(out/"stage-checks.csv",stages)
+    with (out/"unavailable-groups.csv").open("w",newline="",encoding="utf8") as stream:
+        writer=csv.DictWriter(stream,fieldnames=["system","version","group","status","failures","controls","reason"])
+        writer.writeheader()
+        writer.writerows(unavailable)
     for f in sorted(models.glob("*/fold.json")):
         data=json.loads(f.read_text(encoding="utf8"))
         train={tuple(Path(p).parts[-2:]) for p in data["train"]}

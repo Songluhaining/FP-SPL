@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import average_precision_score
+from sklearn.metrics import average_precision_score,precision_recall_curve,auc
 
 METHODS=("full","CLAP","PULP","no_config","no_assertion","frequency")
 ZH={"full":"新方法","CLAP":"有监督分类（CLAP）","PULP":"正例与未标注学习（PULP）",
@@ -65,7 +65,11 @@ def metrics(d,label="label"):
         selected=g.sort_values(["score","configuration"],ascending=[False,True],na_position="last").head(math.ceil(len(g)*0.1))
         hits+=int(selected[label].sum())
         budget+=len(selected)
-    return dict(n=len(d),scored=int(scores.size-d.score.isna().sum()),partial=int((d.status=="partial").sum()),
+    pr_area=None
+    if y.sum():
+        precision_curve,recall_curve,_=precision_recall_curve(y,scores)
+        pr_area=float(auc(recall_curve,precision_curve))
+    return dict(n=len(d),pr_area=pr_area,scored=int(scores.size-d.score.isna().sum()),partial=int((d.status=="partial").sum()),
                 insufficient=int((d.status=="insufficient").sum()),tp=tp,fp=fp,tn=tn,fn=fn,precision=prec,
                 recall=rec,f1=2*tp/max(1,2*tp+fp+fn),accuracy=(tp+tn)/len(d),average_precision=float(average_precision_score(y,scores)) if y.sum() else None,
                 hits=hits,budget=budget)
@@ -90,6 +94,7 @@ def write_tables(frame,destination):
 
 def replay_table(root,truth,output):
     truth_keys=set(truth[["system","version","configuration"]].itertuples(index=False,name=None))
+    label_by_key={tuple(r[:3]):int(r[3]) for r in truth[["system","version","configuration","label"]].itertuples(index=False,name=None)}
     seen=set()
     rows=[]
     receipts=[]
@@ -119,7 +124,7 @@ def replay_table(root,truth,output):
                     xs=plan.get(strategy,[])[:k]
                     statuses=[results[x]["status"] for x in xs]
                     rows.append(dict(system=system,version=version,configuration=c,strategy=strategy,budget=k,
-                        selected=len(xs),eligible=int(plan.get("pool",0)>0),eligible_pool=plan.get("pool",0),confirmed=int("confirmed" in statuses),
+                        selected=len(xs),eligible=int(plan.get("pool",0)>0),eligible_pool=plan.get("pool",0),confirmed=int("confirmed" in statuses),confirmed_label_positive=int("confirmed" in statuses and label_by_key[key]==1),
                         compile_errors=statuses.count("compile_error"),
                         reference_checks=sum(s!="compile_error" for s in statuses),
                         target_checks=sum("first" in results[x] for x in xs)+sum(results[x].get("second") is not None for x in xs),
@@ -131,7 +136,7 @@ def replay_table(root,truth,output):
     records=pd.DataFrame(rows)
     records.to_csv(output/"probe-budgets.csv",index=False)
     pd.DataFrame(receipts).to_csv(output/"replay-outcomes.csv",index=False)
-    return records.groupby(["system","strategy","budget"])[["eligible","selected","confirmed","compile_errors","reference_checks","target_checks","timeouts"]].sum().reset_index()
+    return records.groupby(["system","strategy","budget"])[["eligible","selected","confirmed","confirmed_label_positive","compile_errors","reference_checks","target_checks","timeouts"]].sum().reset_index()
 
 
 if __name__=="__main__":

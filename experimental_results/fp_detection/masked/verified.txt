@@ -1,0 +1,2 @@
+independent audit passed
+predictions_sha256=2ea15c63b719de055aee8f9231555da866301297710a494ccad38e25df3250f1
