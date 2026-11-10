@@ -1,0 +1,7 @@
+system,version,configuration,test,repeat,exit_code,observed_exception,mapped_location
+email,_MultipleBugs_.NOB_1.ID_3,model_m_ca4_0016,test47,1,1,java.lang.StackOverflowError,Addressbook.EmailSystem.Client:9
+email,_MultipleBugs_.NOB_1.ID_3,model_m_ca4_0016,test47,2,1,java.lang.StackOverflowError,Sign.EmailSystem.Client:11
+email,_MultipleBugs_.NOB_1.ID_3,model_m_ca4_0016,test46,1,1,java.lang.StackOverflowError,Encrypt.EmailSystem.Client:14
+email,_MultipleBugs_.NOB_1.ID_3,model_m_ca4_0016,test46,2,1,java.lang.StackOverflowError,Encrypt.EmailSystem.Client:14
+email,_MultipleBugs_.NOB_1.ID_3,model_m_ca4_0016,test02,1,1,java.lang.StackOverflowError,Addressbook.EmailSystem.Client:9
+email,_MultipleBugs_.NOB_1.ID_3,model_m_ca4_0016,test02,2,1,java.lang.StackOverflowError,Addressbook.EmailSystem.Client:9

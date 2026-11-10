@@ -105,7 +105,7 @@ def replay_table(root,truth,output):
             eligible={x for strategy in ("model","random","coverage") for x in plan.get(strategy,[])}
             if eligible!=set(results):
                 raise ValueError(f"补测执行与已选候选不符 {key}")
-            if any(len(choice)!=len(set(choice)) or len(choice)>min(5,plan.get("pool",0))
+            if any(len(choice)!=len(set(choice)) or len(choice)!=min(5,plan.get("pool",0))
                    for choice in (plan.get(k,[]) for k in ("model","random","coverage"))):
                 raise ValueError(f"补测名额或候选唯一性异常 {key}")
             for outcome in results.values():
@@ -119,7 +119,7 @@ def replay_table(root,truth,output):
                     xs=plan.get(strategy,[])[:k]
                     statuses=[results[x]["status"] for x in xs]
                     rows.append(dict(system=system,version=version,configuration=c,strategy=strategy,budget=k,
-                        selected=len(xs),eligible_pool=plan.get("pool",0),confirmed=int("confirmed" in statuses),
+                        selected=len(xs),eligible=int(plan.get("pool",0)>0),eligible_pool=plan.get("pool",0),confirmed=int("confirmed" in statuses),
                         compile_errors=statuses.count("compile_error"),
                         reference_checks=sum(s!="compile_error" for s in statuses),
                         target_checks=sum("first" in results[x] for x in xs)+sum(results[x].get("second") is not None for x in xs),
@@ -131,7 +131,7 @@ def replay_table(root,truth,output):
     records=pd.DataFrame(rows)
     records.to_csv(output/"probe-budgets.csv",index=False)
     pd.DataFrame(receipts).to_csv(output/"replay-outcomes.csv",index=False)
-    return records.groupby(["system","strategy","budget"])[["selected","confirmed","compile_errors","reference_checks","target_checks","timeouts"]].sum().reset_index()
+    return records.groupby(["system","strategy","budget"])[["eligible","selected","confirmed","compile_errors","reference_checks","target_checks","timeouts"]].sum().reset_index()
 
 
 if __name__=="__main__":

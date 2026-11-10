@@ -69,9 +69,13 @@ def verify(root,models,out,original=None,masked=None):
                     if not record["scores"] or not all(math.isfinite(s) and 0<=s<=1 for s in record["scores"].values()):
                         raise ValueError("图后验异常")
                     ok+=1
-                archive.write(json.dumps(dict(system=sys,version=v.name,group=group,**record),ensure_ascii=False)+"\n")
+                ordinary={k:sem.get("locations",{}).get(k) for k in ids}
+                archive.write(json.dumps(dict(system=sys,version=v.name,group=group,ordinary_runs=ordinary,
+                    used_in_posterior=sorted(expected) if record["status"]=="ok" else [],**record),ensure_ascii=False)+"\n")
             stages.append(dict(system=sys,version=v.name,visible_tests=len(visible),failures=len(failed),
                 paired=sum(i["control"] is not None for i in sem["pairs"].values()),groups=len(sem["groups"]),
+                before_site_check=sem.get("groups_before_locations",len(sem["groups"])),
+                known_failure_sites=sum(value["site"] is not None for value in sem.get("locations",{}).values()),
                 scored_groups=ok,unscored_groups=len(sem["groups"])-ok))
             if masked is not None:
                 check_masked(original.joinpath(*SYSTEMS[sys],v.name),masked.joinpath(*SYSTEMS[sys],v.name),rows,

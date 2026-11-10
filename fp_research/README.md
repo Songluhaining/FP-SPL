@@ -35,3 +35,21 @@ python -m fp_research inventory --system bank --version _MultipleBugs_.NOB_1.ID_
 - 历史路径处理仅在加载监督基准的进程内统一路径分隔符。正例与未标注实现使用十种已有可疑度函数，并把其排名返回值转换为特征提取函数所需的语句到分数的映射。
 
 完整审计从逐配置文件重新生成表格，并检查普通通过候选集合、版本划分、组内执行成员、参考构建结果、两次断言复现及隐藏用例隔离。版本清单中的摘要用于核对切片和输入来源。
+
+## 静态切片与阶段检查
+
+版本清单的源码摘要和切片摘要分别覆盖原始构建和两个方向的全语句切片。若需重新构造切片，把同一缺陷版本的配置目录（variants）复制到单独的实验目录，在该副本所在驱动器上执行基准附带的全语句切片程序。以下示例在切片工作副本的版本目录中运行，两个变量分别指向开发工具安装路径与基准源码路径。
+
+```powershell
+$variants = (Resolve-Path ".\variants").Path
+& "$javaHome\bin\java.exe" -Xmx512m "-Dvariants_dir=$variants" -jar "$pulpRoot\plugins\all-statements-slicing.jar"
+```
+
+每个配置应产生前向与后向两份切片。两个方法各自重新计算版本特征，按固定版本划分拟合，再对留出配置评分。仓库中的分数对应本次两个系统的统一协议。
+
+语义归组、对照配对、失效位置、构建匹配、风险和单测隔离可执行下列检查。网络置换检查使用装有深度学习库的解释器。
+
+```powershell
+python -m unittest fp_research.checks.test_intents fp_research.checks.test_pairing fp_research.checks.test_sites fp_research.checks.test_applicability fp_research.checks.test_risk fp_research.checks.test_isolated
+& "../FP-SPL/.venv/Scripts/python.exe" -m unittest fp_research.checks.test_network
+```

@@ -76,6 +76,11 @@ def run(a):
         if a.scenario=="masked":
             evidence_args+=["--original",raw,"--masked",input_data]
         step("audit_evidence",*evidence_args)
+        if a.scenario=="main":
+            step("provenance","--data",raw,"--input",cache,"--workspace",work,"--output",a.results.resolve())
+        report_root=a.results.resolve()
+        if (report_root/"main/replay-summary.csv").exists() and (report_root/"masked/metrics.csv").exists():
+            step("publish_report","--results",report_root,"--paired",out/"evaluation/paired-check.csv")
 
 
 if __name__=="__main__":
