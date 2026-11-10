@@ -1,0 +1,11 @@
+system,method,confirmed,detected
+bank,CLAP,421,325
+bank,PULP,421,206
+bank,configuration,421,361
+bank,full,421,208
+bank,statement,421,421
+email,CLAP,132,50
+email,PULP,132,59
+email,configuration,132,132
+email,full,132,110
+email,statement,132,132
