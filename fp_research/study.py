@@ -45,11 +45,8 @@ def run(a):
         step("refine","--stage","metadata","--sites",out/"sites","--data",input_data,"--runtime",out/"fp/runtime",
              "--input",cache,"--output",cache,"--java-home",java,"--workers",a.workers)
     if "graph" in active:
-        flags=["--data",input_data,"--output",cache,"--java-home",java,"--workers",a.workers]
-        if a.scenario=="main":
-            step("graphs",*flags)
-        else:
-            step("supplement_analysis","--stage","graphs","--original-results",out/"fp",*flags)
+        step("traced_graphs","--data",input_data,"--input",cache,"--cache",out/"isolated-cache",
+             "--java-home",java,"--workers",a.workers)
     if "model" in active:
         step("fit","--input",cache,"--output",models,deep=True)
         if a.scenario=="main":

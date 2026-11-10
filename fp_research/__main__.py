@@ -7,7 +7,7 @@ import sys
 STAGES={
     "inventory":"inventory",
     "group-and-pair":"pairing",
-    "infer":"graphs",
+    "infer":"traced_graphs",
     "fit":"fit",
     "rank":"risk",
     "select-tests":"probes",
