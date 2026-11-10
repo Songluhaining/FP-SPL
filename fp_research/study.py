@@ -1,5 +1,6 @@
 """从原始文件复现实验。默认从清单到独立验收，支持指定连续阶段。"""
 import argparse
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -47,6 +48,8 @@ def run(a):
     if "graph" in active:
         step("traced_graphs","--data",input_data,"--input",cache,"--cache",out/"isolated-cache",
              "--java-home",java,"--workers",a.workers)
+        step("wrapper_recovery","--data",input_data,"--input",cache,"--cache",out/"isolated-cache",
+             "--java-home",java,"--workers",a.workers)
     if "model" in active:
         step("fit","--input",cache,"--output",models,deep=True)
         if a.scenario=="main":
@@ -77,6 +80,9 @@ def run(a):
             evidence_args+=["--original",raw,"--masked",input_data]
         step("audit_evidence",*evidence_args)
         if a.scenario=="main":
+            shutil.copyfile(out/"evaluation/paired-check.csv",a.results.resolve()/"main/paired-check.csv")
+            step("probe_evidence","--input",cache,"--plans",out/"replay","--models",models,"--risk",result("risk"),
+                 "--output",a.results.resolve()/"main/probe-evidence.csv",deep=True)
             step("provenance","--data",raw,"--input",cache,"--workspace",work,"--output",a.results.resolve())
         report_root=a.results.resolve()
         if (report_root/"main/replay-summary.csv").exists() and (report_root/"masked/metrics.csv").exists():
