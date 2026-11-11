@@ -21,11 +21,7 @@ def bodies(variant):
             yield cls+"."+name,(cls,body[body.index("{"):])
 
 
-def run(job):
-    s,version,work,projects,java=job
-    root=work/"main"/s/version.name
-    inventory=root/"inventory.json"
-    rows=json.loads(inventory.read_text(encoding="utf8"))
+def build_plan(s,version,rows):
     failures=[]
     for r in rows:
         if r["outcome"]=="failed":
@@ -53,6 +49,15 @@ def run(job):
             if len(chosen)==5:
                 break
         plan[cid]={"coverage":chosen}
+    return plan
+
+
+def run(job):
+    s,version,work,projects,java=job
+    root=work/"main"/s/version.name
+    inventory=root/"inventory.json"
+    rows=json.loads(inventory.read_text(encoding="utf8"))
+    plan=build_plan(s,version,rows)
     target=root/"replay-plan.json"
     atomic_json(target,plan)
     replay_version((version,target,inventory,projects,projects.parent/"plugins/featurehouse_20210219.jar",

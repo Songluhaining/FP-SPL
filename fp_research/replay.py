@@ -15,7 +15,8 @@ from .test_sources import filtered
 
 ROOT=Path(__file__).resolve().parents[1]
 REFERENCE_PROJECTS={"bank":"BankAccountTP","email":"Email-FH-JML",
-                    "elevator":"Elevator-FH-JML","examdb":"ExamDB-FH-JML"}
+                    "elevator":"Elevator-FH-JML","examdb":"ExamDB-FH-JML",
+                    "gpl":"GPL-Test","zipme":"ZipMe"}
 
 
 def compile_sources(javac,sources,directory,classpath):
@@ -34,6 +35,9 @@ def security_key(paths):
 def reference_build(features,system,projects,tool,cache,home):
     original=projects/REFERENCE_PROJECTS[system]/"features"
     selected=[original/f for f in features]
+    missing=[str(p) for p in selected if not p.is_dir()]
+    if missing:
+        raise FileNotFoundError("参考特征源码缺失: "+", ".join(missing))
     key=security_key([tool,*[p for feature in selected for p in feature.rglob("*.java")]])
     root=cache/"reference"/key
     classes=root/"classes"
@@ -102,10 +106,10 @@ def prepare_probe(donor,identity,dest,tag):
 
 
 def replay_version(job):
-    source,plan_path,inventory,projects,tool,cache,home=job
+    source,plan_path,inventory,projects,tool,cache,home=job[:7]
     plan=json.loads(plan_path.read_text(encoding="utf8"))
     rows=json.loads(inventory.read_text(encoding="utf8"))
-    system=plan_path.parent.parent.name
+    system=job[7] if len(job)>7 else plan_path.parent.parent.name
     dest=plan_path.parent/"executions"
     dest.mkdir(parents=True,exist_ok=True)
     for row in rows:
