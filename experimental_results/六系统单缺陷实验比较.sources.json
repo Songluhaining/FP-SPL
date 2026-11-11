@@ -1,0 +1,66 @@
+{
+  "generated": "2026-11-11T20:11:09+08:00",
+  "rows": 192,
+  "sha256": "e393595162e27e1371f2302ead5f81b2be6dc8b2aef68a78359548442326825f",
+  "source_files": {
+    "E:\\Myself\\投稿\\work7\\BRFL\\experimental_results\\latent_fault\\metrics.csv": "f7f2e6a1ac43af89b17f4ac0bf6f8a86b7be5fd8fe2134f2ee1e97265a96a758",
+    "E:\\Myself\\投稿\\work7\\BRFL\\experimental_results\\fp_detection\\main\\predictions.csv": "798b84afe8066dcf26a5068664a820fcdcc2cc6358870ec7bb6cf924fa8673d9",
+    "E:\\Myself\\投稿\\work7\\BRFL\\experimental_results\\latent_fault\\predictions.csv": "2c37ba1e33aa62601feb329ec3b3df8162d11f28d4063d9c4d0cc2cfd286f6f2",
+    "E:\\Myself\\投稿\\work7\\BRFL\\experimental_results\\fp_detection\\masked\\predictions.csv": "2ea15c63b719de055aee8f9231555da866301297710a494ccad38e25df3250f1",
+    "E:\\Myself\\投稿\\work7\\BRFL\\experimental_results\\latent_fault\\transfer-comparison.csv": "7aa8a6cf90425bb8989f014a8f00e365da6cbc053fa9c41ae1f240098e7cd681",
+    "E:\\Myself\\投稿\\work7\\BRFL\\experimental_results\\latent_extension\\main\\metrics.csv": "974fa80eb1d46079c203925442fbf8d7e0490d0d8d25a739ce7700d9ad8a3bda",
+    "E:\\Myself\\投稿\\work7\\BRFL\\experimental_results\\latent_extension\\main\\predictions.csv": "072ec935fdfa6c398b9d11d6df9f26fd81c4dfe2866767f47e3116fe1b040a34",
+    "E:\\Myself\\投稿\\work7\\BRFL\\experimental_results\\latent_extension\\masked\\metrics.csv": "a11c092db52a81738165537fa7c4d59f7b4a227301c14c2699a75e91acaeb392",
+    "E:\\Myself\\投稿\\work7\\BRFL\\experimental_results\\latent_extension\\masked\\predictions.csv": "d0a3f5096c2982807ea13362894694e2519115f0c5c8082ae30def470e27f0b4"
+  },
+  "counts": {
+    "bank": {
+      "versions": 73,
+      "configurations": 2482,
+      "passed": 1697,
+      "observed": 73,
+      "completed": 73,
+      "replayed": null
+    },
+    "email": {
+      "versions": 36,
+      "configurations": 972,
+      "passed": 505,
+      "observed": 36,
+      "completed": 36,
+      "replayed": null
+    },
+    "elevator": {
+      "versions": 20,
+      "configurations": 360,
+      "passed": 231,
+      "observed": 20,
+      "completed": 20,
+      "replayed": null
+    },
+    "examdb": {
+      "versions": 49,
+      "configurations": 392,
+      "passed": 323,
+      "observed": 49,
+      "completed": 49,
+      "replayed": null
+    },
+    "gpl": {
+      "versions": 105,
+      "configurations": 10395,
+      "passed": 8020,
+      "observed": 105,
+      "completed": 23,
+      "replayed": 28
+    },
+    "zipme": {
+      "versions": 55,
+      "configurations": 1375,
+      "passed": 689,
+      "observed": 14,
+      "completed": 0,
+      "replayed": 19
+    }
+  }
+}
