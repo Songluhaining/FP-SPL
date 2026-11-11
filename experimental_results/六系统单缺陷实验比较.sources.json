@@ -1,7 +1,7 @@
 {
-  "generated": "2026-11-11T20:11:09+08:00",
-  "rows": 192,
-  "sha256": "e393595162e27e1371f2302ead5f81b2be6dc8b2aef68a78359548442326825f",
+  "generated": "2026-11-12T06:49:34+08:00",
+  "rows": 249,
+  "sha256": "7346f50872f478ce46b342b7c3a944735463e85f8ec281381d2cc612e9ee56b6",
   "source_files": {
     "E:\\Myself\\投稿\\work7\\BRFL\\experimental_results\\latent_fault\\metrics.csv": "f7f2e6a1ac43af89b17f4ac0bf6f8a86b7be5fd8fe2134f2ee1e97265a96a758",
     "E:\\Myself\\投稿\\work7\\BRFL\\experimental_results\\fp_detection\\main\\predictions.csv": "798b84afe8066dcf26a5068664a820fcdcc2cc6358870ec7bb6cf924fa8673d9",
@@ -11,7 +11,9 @@
     "E:\\Myself\\投稿\\work7\\BRFL\\experimental_results\\latent_extension\\main\\metrics.csv": "974fa80eb1d46079c203925442fbf8d7e0490d0d8d25a739ce7700d9ad8a3bda",
     "E:\\Myself\\投稿\\work7\\BRFL\\experimental_results\\latent_extension\\main\\predictions.csv": "072ec935fdfa6c398b9d11d6df9f26fd81c4dfe2866767f47e3116fe1b040a34",
     "E:\\Myself\\投稿\\work7\\BRFL\\experimental_results\\latent_extension\\masked\\metrics.csv": "a11c092db52a81738165537fa7c4d59f7b4a227301c14c2699a75e91acaeb392",
-    "E:\\Myself\\投稿\\work7\\BRFL\\experimental_results\\latent_extension\\masked\\predictions.csv": "d0a3f5096c2982807ea13362894694e2519115f0c5c8082ae30def470e27f0b4"
+    "E:\\Myself\\投稿\\work7\\BRFL\\experimental_results\\latent_extension\\masked\\predictions.csv": "d0a3f5096c2982807ea13362894694e2519115f0c5c8082ae30def470e27f0b4",
+    "E:\\Myself\\投稿\\work7\\BRFL\\experimental_results\\gpl_zipme\\main\\metrics.csv": "e31fcd05f2b371e73804a18d8d2cd1de6fd2fdd7c6ef06402ff85e95e7ea35dc",
+    "E:\\Myself\\投稿\\work7\\BRFL\\experimental_results\\gpl_zipme\\main\\predictions.csv": "3fdbca70e512adab9f01f6fa29090d0bd8bc8aec685be294999eb5f90ab8a521"
   },
   "counts": {
     "bank": {
@@ -51,16 +53,16 @@
       "configurations": 10395,
       "passed": 8020,
       "observed": 105,
-      "completed": 23,
-      "replayed": 28
+      "completed": 105,
+      "replayed": 105
     },
     "zipme": {
       "versions": 55,
       "configurations": 1375,
       "passed": 689,
-      "observed": 14,
-      "completed": 0,
-      "replayed": 19
+      "observed": 55,
+      "completed": 55,
+      "replayed": 55
     }
   }
 }
