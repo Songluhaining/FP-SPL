@@ -5,6 +5,8 @@ import java.util.*;
 import slice.*;
 import com.ibm.wala.classLoader.SourceDirectoryTreeModule;
 import com.ibm.wala.ipa.callgraph.CallGraph;
+import com.ibm.wala.ipa.callgraph.propagation.InstanceKey;
+import com.ibm.wala.ipa.callgraph.propagation.PointerAnalysis;
 import com.ibm.wala.ipa.slicer.*;
 import com.ibm.wala.ipa.modref.ModRef;
 import com.ibm.wala.ssa.*;
@@ -13,6 +15,40 @@ import com.ibm.wala.ssa.*;
 public class SliceProfile {
     static long started=System.nanoTime();
     static void log(String phase) {System.out.printf(Locale.ROOT,"%.3f %s%n",(System.nanoTime()-started)/1e9,phase);}
+    /** 图完全构建后只读复用邻接枚举；结束时逐项重新读取原图，拒绝任何变化。 */
+    static class CachedGraph extends SDG<InstanceKey> {
+        boolean enabled=false;
+        long hits=0;
+        final HashMap<Statement,List<Statement>> next=new HashMap<>(),previous=new HashMap<>();
+        @SuppressWarnings("unchecked") CachedGraph(CallGraph graph,PointerAnalysis<?> analysis) {
+            super(graph,(PointerAnalysis<InstanceKey>)analysis,ModRef.make(),Slicer.DataDependenceOptions.NO_HEAP,
+                  Slicer.ControlDependenceOptions.NO_EXCEPTIONAL_EDGES,null);
+        }
+        static List<Statement> collect(Iterator<Statement> iterator) {
+            List<Statement> result=new ArrayList<>();iterator.forEachRemaining(result::add);return result;
+        }
+        @Override public Iterator<Statement> getSuccNodes(Statement statement) {
+            if(!enabled)return super.getSuccNodes(statement);
+            List<Statement> values=next.get(statement);
+            if(values==null) {values=collect(super.getSuccNodes(statement));next.put(statement,values);} else hits++;
+            return values.iterator();
+        }
+        @Override public Iterator<Statement> getPredNodes(Statement statement) {
+            if(!enabled)return super.getPredNodes(statement);
+            List<Statement> values=previous.get(statement);
+            if(values==null) {values=collect(super.getPredNodes(statement));previous.put(statement,values);} else hits++;
+            return values.iterator();
+        }
+        void verifyUnchanged() {
+            for(Map.Entry<Statement,List<Statement>> entry:next.entrySet())
+                if(!entry.getValue().equals(collect(super.getSuccNodes(entry.getKey()))))
+                    throw new IllegalStateException("Successor adjacency changed during slicing");
+            for(Map.Entry<Statement,List<Statement>> entry:previous.entrySet())
+                if(!entry.getValue().equals(collect(super.getPredNodes(entry.getKey()))))
+                    throw new IllegalStateException("Predecessor adjacency changed during slicing");
+            log("adjacency verified; hits="+hits+" cached="+(next.size()+previous.size()));
+        }
+    }
     /** 原实现每次加边扫描所有根；这里维护“某语句出现在哪些根的切片里”的精确索引。 */
     static class Indexed {
         final HashMap<Statement,HashSet<Statement>> map;
@@ -76,9 +112,9 @@ public class SliceProfile {
         engine.setExclusionsFile("Java60RegressionExclusions.txt");
         engine.buildAnalysisScope(); log("scope");
         CallGraph graph=engine.buildDefaultCallGraph(); log("call graph");
-        SDG sdg=new SDG(graph,engine.getPointerAnalysis(),ModRef.make(),Slicer.DataDependenceOptions.NO_HEAP,
-                        Slicer.ControlDependenceOptions.NO_EXCEPTIONAL_EDGES,null);
+        CachedGraph sdg=new CachedGraph(graph,engine.getPointerAnalysis());
         sdg.eagerConstruction();log("dependence graph");
+        sdg.enabled=Boolean.parseBoolean(System.getProperty("cached.adjacency","true"));
         Method seeds=SliceFromStatement.class.getDeclaredMethod("getAllStatements",SDG.class);
         seeds.setAccessible(true);
         List<Statement> statements=(List<Statement>)seeds.invoke(null,sdg);
@@ -94,6 +130,7 @@ public class SliceProfile {
             if(++index%100==0)log("seeds "+index+"/"+statements.size());
         }
         log("seed slicing finished; puts="+puts.size());
+        if(sdg.enabled)sdg.verifyUnchanged();
         if(Boolean.getBoolean("indexed.propagation"))propagate(puts);
         else SliceFromStatement.slicePutAttributeStatements(puts);
         log("field propagation");

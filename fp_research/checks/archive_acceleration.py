@@ -16,7 +16,7 @@ def main():
     proofs = []
     for system, parts in SYSTEMS.items():
         base = data.joinpath(*parts)
-        for path in sorted(base.glob("*/.fp_research/profile-indexed/*/verified.json")):
+        for path in sorted(base.glob("*/.fp_research/profile-adjacency/*/verified.json")):
             record = json.loads(path.read_text(encoding="utf8"))
             assert record["runner_sha256"] == source_hash
             assert record["binary_sha256"] == binary_hash
