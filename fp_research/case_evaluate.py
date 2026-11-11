@@ -15,6 +15,7 @@ from .compare import run,load_features
 from .compare_latent import KEYS,paired_difference
 from .extension_evaluate import eval_metrics
 from .truth import ground_truth
+from .input_verification import verify_inputs
 
 
 def partitions(data,scenario,with_external=True):
@@ -44,6 +45,8 @@ def partitions(data,scenario,with_external=True):
 
 
 def prepare(a):
+    jobs=[(s,v) for s in SYSTEMS for v in case_versions(a.data,s)]
+    verified=verify_inputs(jobs,a.scenario,a.output/'raw-input-verification.json',getattr(a,'verify_workers',8))
     truth=pd.DataFrame(ground_truth(a.data,SYSTEMS)).assign(converted=0)
     version_rows=[]
     construction=[]
@@ -54,7 +57,7 @@ def prepare(a):
             rows=json.loads((folder/"inventory.json").read_text(encoding="utf8"))
             audit=json.loads((folder/"coverage-audit.json").read_text(encoding="utf8"))
             complete=json.loads((folder/"complete.json").read_text(encoding="utf8"))
-            if raw_digest(v)!=complete["raw_digest"]:raise ValueError(f"完成后原始输入改变: {v}")
+            if verified[(system,v.name)]!=complete["raw_digest"]:raise ValueError(f"核验后完成记录改变: {v}")
             with (v/"config.report.csv.done").open(encoding="utf-8-sig",newline="") as stream:
                 original_status={r[0]:r[-1].strip("_").lower() for r in list(csv.reader(stream))[1:]}
             original_rows=json.loads((results(v,"main")/"inventory.json").read_text(encoding="utf8"))
@@ -242,6 +245,7 @@ def main():
     p.add_argument("stage",choices=["truth","fit","audit","repeat","replay"])
     p.add_argument("--scenario",choices=["main","masked"],default="main")
     p.add_argument("--method",choices=["CLAP","PULP"])
+    p.add_argument("--verify-workers",type=int,default=8)
     p.add_argument("--data",type=Path,default=Path("D:/dataset/whn"))
     p.add_argument("--output",type=Path,default=ROOT/"experimental_results/gpl_zipme")
     a=p.parse_args()
