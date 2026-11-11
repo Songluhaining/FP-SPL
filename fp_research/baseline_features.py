@@ -14,7 +14,7 @@ CLAP_FIELDS = ["VARIANT","LABEL","DDU","code_coverage","incorrectness_verifiabil
                "correctness_reflectability","bscp","bug_involving_statements"]
 
 
-def worker(job):
+def worker(job,optimize=False):
     code, method, version, slices, out = job
     out.mkdir(parents=True,exist_ok=True)
     os.chdir(out)
@@ -23,6 +23,9 @@ def worker(job):
         import FileManager
         FileManager.join_path = lambda *parts: Path(os.path.join(*parts)).as_posix()
     from consistent_testing_manager import FPMatricsCaculation as f
+    if optimize:
+        from fp_research.baseline_cache import install
+        install(f)
     rows=list(records(version))
     failing=[r["configuration"] for r in rows if r["outcome"]=="failed"]
     labels=out/"observations.csv"

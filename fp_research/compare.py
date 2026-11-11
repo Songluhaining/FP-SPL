@@ -24,21 +24,25 @@ def load_features(version,method):
     return names,observations,table
 
 
-def run(root,repo,method,truth,target,only=None,systems=("bank", "email"),extra_splits=()):
+def run(root,repo,method,truth,target,only=None,systems=("bank", "email"),extra_splits=(),
+        partitions=None,identities=None):
     sys.path.insert(0,str(repo.resolve()))
     if method=="CLAP":
         import PassingVariants_Classification as implementation
     else:
         from fp_detection.PUBaggingLearning import PUBaggingLearning
     predictions=[]
-    for name,training,testing in [*splits(root,systems), *extra_splits]:
+    selected=[*splits(root,systems), *extra_splits] if partitions is None else partitions
+    def identity(version):
+        return identities[version] if identities is not None else (version.parent.name,version.name)
+    for name,training,testing in selected:
         if only and not name.startswith(only+"-fold"):
             continue
         x,y=[],[]
         for v in training:
             ids,obs,table=load_features(v,method)
             x.append(table)
-            y.extend([truth[(v.parent.name,v.name,i)] for i in ids] if method=="CLAP" else obs)
+            y.extend([truth[(*identity(v),i)] for i in ids] if method=="CLAP" else obs)
         X=pd.concat(x)
         if method=="PULP":
             positive=y.count("F")
@@ -52,7 +56,7 @@ def run(root,repo,method,truth,target,only=None,systems=("bank", "email"),extra_
             ids,obs,table=load_features(v,method)
             keep=np.array([o!="F" for o in obs])
             test_tables.append(table.loc[keep])
-            ids_all.extend((v.parent.name,v.name,i) for i,k in zip(ids,keep) if k)
+            ids_all.extend((*identity(v),i) for i,k in zip(ids,keep) if k)
         test=pd.concat(test_tables)[X.columns].to_numpy()
         if method=="CLAP" and len(set(y))==1:
             # 原版二分类器无法在单类训练集上拟合。保留留出配置与缺失分数。
