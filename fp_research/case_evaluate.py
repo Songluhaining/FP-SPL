@@ -209,17 +209,22 @@ def replays(a):
     out.to_csv(a.output/"replay-outcomes.csv",index=False)
     pd.DataFrame(configurations).to_csv(a.output/"replay-configurations.csv",index=False)
     counts=[]
+    statuses=[]
     for budget in (1,3,5):
         selected=out[out.position<=budget]
         for system in SYSTEMS:
             part=selected[selected.system==system]
+            statuses.extend(dict(system=system,budget=budget,status=status,tests=int(n))
+                            for status,n in part.status.value_counts().items())
             counts.append(dict(system=system,budget=budget,planned_tests=len(part),
                                with_tests=len(part[KEYS].drop_duplicates()),
                                confirmed=len(part[part.status=="confirmed"][KEYS].drop_duplicates()),
                                compile_errors=int((part.status=="compile_error").sum()),
                                timeouts=int(part.status.str.contains("timeout").sum()),
-                               runtime_errors=int((part.status=="runtime_error").sum())))
+                               runtime_errors=int(part.status.str.endswith(('runtime_error','runner_error')).sum()),
+                               reference_assertion_failures=int((part.status=='reference_assertion').sum())))
     pd.DataFrame(counts).to_csv(a.output/"replay-budget-counts.csv",index=False)
+    pd.DataFrame(statuses).to_csv(a.output/"replay-status-counts.csv",index=False)
     if (a.output/"predictions.csv").exists():
         predictions=pd.read_csv(a.output/"predictions.csv")
         summary=[]
