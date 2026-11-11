@@ -18,6 +18,7 @@ from fp_research.test_environment import recompile_scaffolding
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--version',type=Path,required=True)
+    p.add_argument('--output',type=Path,default=ROOT/'experimental_results/gpl_zipme/environment-verification.json')
     a=p.parse_args();v=a.version.resolve()
     out=v/'.fp_research/environment-check';out.mkdir(parents=True,exist_ok=True)
     before=raw_digest(v)
@@ -57,7 +58,7 @@ def main():
         raise ValueError('输入摘要或留存测试核验失败')
     receipt=dict(version=v.name,raw_digest=before,original_failure_preserved=proofs,
                  retained_tests=checks,scope='仅映射运行副本中三个环境目录；原测试和产品不变')
-    atomic_json(ROOT/'experimental_results/gpl_zipme/environment-verification.json',receipt)
+    atomic_json(a.output,receipt)
     print('环境兼容核验通过',len(checks),flush=True)
 
 
