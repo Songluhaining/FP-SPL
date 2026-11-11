@@ -24,8 +24,9 @@ def worker(job,optimize=False):
         FileManager.join_path = lambda *parts: Path(os.path.join(*parts)).as_posix()
     from consistent_testing_manager import FPMatricsCaculation as f
     if optimize:
-        from fp_research.baseline_cache import install
+        from fp_research.baseline_cache import install,install_file_cache
         install(f)
+        install_file_cache(version)
     rows=list(records(version))
     failing=[r["configuration"] for r in rows if r["outcome"]=="failed"]
     labels=out/"observations.csv"
@@ -36,7 +37,7 @@ def worker(job,optimize=False):
     f.get_labeled_failing_variants=lambda *_: failing
     if not hasattr(f,"_original_dependencies"):
         f._original_dependencies=f.get_dependencies
-    @lru_cache(maxsize=128)
+    @lru_cache(maxsize=512)
     def dependencies(path):
         relative=Path(path).relative_to(version)
         return f._original_dependencies(str(slices/relative))

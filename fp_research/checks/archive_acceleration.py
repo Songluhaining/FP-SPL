@@ -36,10 +36,24 @@ def main():
         assert reference.read_bytes() == output.read_bytes()
         features.append(dict(method=method, reference=str(reference), output=str(output),
                              sha256=hashlib.sha256(output.read_bytes()).hexdigest(), byte_equal=True))
+    additional=[]
+    for system, parts in SYSTEMS.items():
+        base=data.joinpath(*parts)
+        for path in sorted(base.glob("*/.fp_research/cached-check/*/features.csv")):
+            receipt=path.with_name("verified.json")
+            if not receipt.exists():receipt=path.with_name("run.json")
+            if not receipt.exists():continue
+            record=json.loads(receipt.read_text(encoding="utf8"))
+            reference=path.parents[2]/"main"/path.parent.name/"features.csv"
+            assert path.read_bytes()==reference.read_bytes(),str(path)
+            assert hashlib.sha256(path.read_bytes()).hexdigest()==record["sha256"]
+            additional.append(dict(record,system=system,method=path.parent.name,output=str(path),
+                                   reference=str(reference),byte_equal=True))
     atomic_json(ROOT / "experimental_results/gpl_zipme/acceleration-verification.json",
                 dict(runner_key=key, slice_comparisons=proofs, feature_comparisons=features,
+                     additional_feature_comparisons=additional,
                      scope="等价计算核验；不代表两个系统分类实验已完成"))
-    print("6 real slice comparisons and 2 complete feature tables verified")
+    print("6 real slice comparisons and",len(features)+len(additional),"complete feature tables verified")
 
 
 if __name__ == "__main__":

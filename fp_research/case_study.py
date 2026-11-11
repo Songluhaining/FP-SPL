@@ -31,6 +31,7 @@ _AUDIT_POOL=None
 _SLICE_WORKERS=int(os.environ.get("FP_SLICE_WORKERS","4"))
 _SLICE_TIMEOUT=int(os.environ.get("FP_SLICE_TIMEOUT","7200"))
 _SLICE_BACKEND=os.environ.get("FP_SLICE_BACKEND","original")
+_SLICE_HEAP_MB=int(os.environ.get("FP_SLICE_HEAP_MB","1536"))
 _SLICE_SLOTS=threading.BoundedSemaphore(_SLICE_WORKERS)
 
 
@@ -106,7 +107,7 @@ def slices(source,output,cache):
                         command=[JAVA/"bin/java.exe","-Xmx1024m","-XX:+UseSerialGC",
                                  "-Djava.io.tmpdir="+str(stage),"-Dvariants_dir="+str(stage/"variants"),"-jar",jar]
                         if _SLICE_BACKEND=="indexed":
-                            command=[JAVA/"bin/java.exe","-Xmx3072m","-XX:+UseSerialGC",
+                            command=[JAVA/"bin/java.exe",f"-Xmx{_SLICE_HEAP_MB}m","-XX:+UseSerialGC",
                                      "-Djava.io.tmpdir="+str(stage),"-Dvariants_dir="+str(stage/"variants"),
                                      "-Dskip.unexecuted=true","-Dindexed.propagation=true","-cp",
                                      str(runner)+os.pathsep+str(jar),"SliceProfile",str(product/"src")]
@@ -247,6 +248,7 @@ def main():
     p.add_argument("--data",type=Path,default=Path("D:/dataset/whn"))
     p.add_argument("--system",choices=SYSTEMS)
     p.add_argument("--version")
+    p.add_argument("--exclude-version",action="append",default=[],help="排除已由其他工作进程独立处理的版本")
     p.add_argument("--pending-only",action="store_true",help="仅续跑无完成凭据的案例，最终评价再次核对输入摘要")
     p.add_argument("--workers",type=int,default=6)
     p.add_argument("--source",type=Path)
@@ -258,9 +260,13 @@ def main():
                optimize=True)
         return
     jobs=[(s,v,a.scenario,a.stage=="observe") for s in ([a.system] if a.system else SYSTEMS)
-          for v in case_versions(a.data.resolve(),s) if (not a.version or v.name==a.version)
+          for v in case_versions(a.data.resolve(),s) if (not a.version or v.name==a.version) and v.name not in a.exclude_version
           and (not a.pending_only or not (results(v,a.scenario)/"complete.json").exists())]
-    if not jobs: raise ValueError("没有找到选定版本")
+    if not jobs:
+        if a.pending_only:
+            print("所选版本均已有完成记录；最终评价仍会核对输入摘要",flush=True)
+            return
+        raise ValueError("没有找到选定版本")
     failures=[]
     with ProcessPoolExecutor(max_workers=min(4,a.workers)) as auditing, ThreadPoolExecutor(max_workers=a.workers) as pool:
         _AUDIT_POOL=auditing

@@ -3,8 +3,10 @@ import argparse
 import csv
 import hashlib
 import json
+import os
 from pathlib import Path
 import tempfile
+import xml.etree.ElementTree as ET
 
 import pandas as pd
 
@@ -52,6 +54,15 @@ def prepare(a):
             audit=json.loads((folder/"coverage-audit.json").read_text(encoding="utf8"))
             complete=json.loads((folder/"complete.json").read_text(encoding="utf8"))
             if raw_digest(v)!=complete["raw_digest"]:raise ValueError(f"完成后原始输入改变: {v}")
+            with (v/"config.report.csv.done").open(encoding="utf-8-sig",newline="") as stream:
+                original_status={r[0]:r[-1].strip("_").lower() for r in list(csv.reader(stream))[1:]}
+            original_rows=json.loads((results(v,"main")/"inventory.json").read_text(encoding="utf8"))
+            if original_status!={r["configuration"]:r["outcome"] for r in original_rows}:
+                raise ValueError(f"原始配置报告与清单不符: {v}")
+            for row in truth[(truth.system==system)&(truth.version==v.name)].itertuples():
+                coverage=v/"variants"/row.configuration/"coverage/spectrum_passed_coverage.xml"
+                marked=any(line.get("buggy")=="true" for line in ET.parse(coverage).iter("line"))
+                if marked!=bool(row.label):raise ValueError(f"缺陷标记与独立重建标签不同: {coverage}")
             if a.scenario=="masked":
                 receipt=json.loads((folder/"construction.json").read_text(encoding="utf8"))
                 original=json.loads((results(v,"main")/"inventory.json").read_text(encoding="utf8"))
@@ -119,6 +130,11 @@ def evaluate(a):
     for _,g in frame.groupby(["protocol","method"]):
         if len(g)!=len(ids) or set(g[KEYS].itertuples(index=False,name=None))!=ids:
             raise ValueError("候选有遗漏或重复")
+    if set(frame.method)!={"statement","configuration","CLAP","PULP"} or frame.groupby(["protocol","method"]).ngroups!=12:
+        raise ValueError("缺少方法或评价协议")
+    assigned={(r["split"],r["system"],r["version"]) for r in assignments if r["role"]=="test"}
+    if any((r.split,r.system,r.version) not in assigned for r in frame.itertuples()):
+        raise ValueError("配置属于错误验证折")
     tables=[]
     for (s,p,m),g in frame.groupby(["system","protocol","method"]):
         groups={"all":g,"base":g[g.base==1],"other":g[g.base==0]}
@@ -145,6 +161,17 @@ def evaluate(a):
                 rows.append(table.assign(system=s,version=v.name,configuration=names,observed=observed))
         pd.concat(rows,ignore_index=True).to_csv(a.output/("features-"+method+".csv.gz"),index=False,
                                                 compression={"method":"gzip","mtime":0})
+    sources=[]
+    for method in ("CLAP","PULP"):
+        source=ROOT.parent/method
+        for folder,dirs,names in os.walk(source):
+            dirs[:]=sorted(d for d in dirs if d not in {"venv",".venv","__pycache__",".git","projects","logs"})
+            for name in sorted(names):
+                path=Path(folder)/name
+                if path.suffix==".py" or name in {"all-statements-slicing.jar","featurehouse_20210219.jar"}:
+                    sources.append(dict(method=method,path=path.relative_to(source).as_posix(),
+                                        sha256=hashlib.sha256(path.read_bytes()).hexdigest()))
+    pd.DataFrame(sources).to_csv(a.output/"source-hashes.csv",index=False)
 
 
 def replays(a):
