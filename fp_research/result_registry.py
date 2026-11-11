@@ -11,6 +11,7 @@ import subprocess
 import pandas as pd
 
 from .case_study import ROOT,SYSTEMS,case_versions,results
+from .checks.verify_extension import average_precision
 
 NAMES={"bank":"银行账户（BankAccountTP）","email":"邮件（Email）",
        "elevator":"电梯（Elevator）","examdb":"考试数据库（ExamDB）",
@@ -66,6 +67,11 @@ def check(frame,table):
     for name,value in expected.items():
         if not math.isclose(value,float(table[name]),rel_tol=1e-12,abs_tol=1e-12):
             raise ValueError(f"独立复算不一致 {name}: {value} != {table[name]}")
+    ap=average_precision(y.tolist(),frame.score.tolist())
+    if ap is None:
+        if not pd.isna(table['average_precision']):raise ValueError("无阳性子集的排序指标应为空")
+    elif not math.isclose(ap,float(table['average_precision']),rel_tol=1e-12,abs_tol=1e-12):
+        raise ValueError("平均精确率独立积分不一致")
 
 
 def inventory(data):

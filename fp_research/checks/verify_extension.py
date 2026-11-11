@@ -18,6 +18,26 @@ def identity(row):
     return tuple(row[k] for k in KEY)
 
 
+def average_precision(labels,scores):
+    """按相同分数组整体进入排名，独立积分精确率；无分项沿用归档的末位规则。"""
+    groups={}
+    for label,score in zip(labels,scores):
+        score=-1e30 if score is None or math.isnan(float(score)) else float(score)
+        counts=groups.setdefault(score,[0,0])
+        counts[0]+=int(label)
+        counts[1]+=1
+    positives=sum(p for p,n in groups.values())
+    if not positives:return None
+    tp=seen=0
+    result=0.0
+    for score in sorted(groups,reverse=True):
+        positive,count=groups[score]
+        tp+=positive
+        seen+=count
+        result+=(positive/positives)*(tp/seen)
+    return result
+
+
 def verify(path):
     truth=read(path/"truth.csv")
     keys={identity(row) for row in truth}
@@ -67,6 +87,11 @@ def verify(path):
             expected["budget"]+=budget
         if any(not math.isclose(val,float(table[k]),abs_tol=1e-12) for k,val in expected.items()):
             raise ValueError(f"复算失败 {table}")
+        ap=average_precision([int(float(r[y])) for r in case],[float(r['score']) if r['score'] else None for r in case])
+        if ap is None:
+            if table['average_precision'] not in ('','nan'):raise ValueError("无阳性子集的排序指标应为空")
+        elif not math.isclose(ap,float(table['average_precision']),abs_tol=1e-12):
+            raise ValueError("平均精确率独立积分不一致")
     print(path.name,len(keys),"unique configurations,",len(rows),"verified predictions")
 
 
