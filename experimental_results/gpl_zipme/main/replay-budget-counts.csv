@@ -1,0 +1,7 @@
+system,budget,planned_tests,with_tests,confirmed,compile_errors,timeouts,runtime_errors
+gpl,1,8020,8020,826,6653,0,79
+zipme,1,689,689,179,225,0,229
+gpl,3,21699,8020,916,18363,0,159
+zipme,3,1911,689,219,618,0,595
+gpl,5,33411,8020,925,28616,0,182
+zipme,5,2702,689,222,834,0,886

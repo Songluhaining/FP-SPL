@@ -53,6 +53,7 @@ def main():
                 command("case_evaluate","repeat","--method",method,"--scenario",scenario,"--data",str(a.data))
             command("case_evaluate","audit","--scenario",scenario,"--data",str(a.data))
             verify(output/scenario)
+            if scenario=="main":command("case_evaluate","replay","--data",str(a.data))
             atomic_json(output/scenario/"registry-verified.json",dict(retraining="逐字节一致",independent_statistics="通过",
                         metrics_sha256=hashlib.sha256((output/scenario/"metrics.csv").read_bytes()).hexdigest(),
                         predictions_sha256=hashlib.sha256((output/scenario/"predictions.csv").read_bytes()).hexdigest()))

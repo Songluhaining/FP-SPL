@@ -1,6 +1,7 @@
 """在原案例目录下完成新增系统实验，原始输入只读，工作视图仅作临时文件。"""
 import argparse
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import csv
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 import hashlib
 import json
 import os
@@ -16,7 +17,6 @@ from .inventory import records, atomic_json
 from .latent_fault import infer, read_version
 from .checks.rebuild_latent import verify_version
 from .baseline_features import worker
-from .extension import slice_inputs
 from .risk import save_rows
 from .supplement import version_stage
 from .audit_evidence import check_masked
@@ -26,8 +26,11 @@ SYSTEMS={"gpl":("GPL","4wise-GPL-1BUG-Full"),"zipme":("ZipMe","4wise-ZipMe-1BUG-
 JAVA=Path("E:/Program Files/Java/jdk-1.8")
 _LOCKS={}
 _GUARD=threading.Lock()
+_ALIASES={}
+_AUDIT_POOL=None
 _SLICE_WORKERS=int(os.environ.get("FP_SLICE_WORKERS","4"))
 _SLICE_TIMEOUT=int(os.environ.get("FP_SLICE_TIMEOUT","7200"))
+_SLICE_BACKEND=os.environ.get("FP_SLICE_BACKEND","original")
 _SLICE_SLOTS=threading.BoundedSemaphore(_SLICE_WORKERS)
 
 
@@ -42,12 +45,18 @@ def results(version,scenario):
 def raw_digest(version):
     h=hashlib.sha256()
     paths=[]
-    for folder,dirs,files in os.walk(version):
-        dirs[:]=[d for d in dirs if d!=".fp_research"]
-        paths.extend(Path(folder)/name for name in files)
-    for p in sorted(paths):
+    pending=[version]
+    while pending:
+        folder=pending.pop()
+        with os.scandir(folder) as entries:
+            for entry in entries:
+                if entry.is_dir():
+                    if entry.name!=".fp_research":pending.append(Path(entry.path))
+                else:
+                    # Windows目录枚举已有这些属性，无需逐文件再次查询。
+                    paths.append((Path(entry.path),entry.stat()))
+    for p,stat in sorted(paths,key=lambda pair:pair[0]):
         rel=p.relative_to(version)
-        stat=p.stat()
         h.update((rel.as_posix()+str(stat.st_size)+str(stat.st_mtime_ns)).encode())
         if (rel.parts[0] in {"features"} or p.name.startswith("config.report")
             or "src" in rel.parts or "test" in rel.parts or p.name.startswith("spectrum_")):
@@ -56,18 +65,33 @@ def raw_digest(version):
 
 
 def slices(source,output,cache):
+    from .slice_reuse import signatures
+    from .slice_runner import compiled_runner
     jar=ROOT.parent/"PULP/plugins/all-statements-slicing.jar"
     jar_hash=hashlib.sha256(jar.read_bytes()).hexdigest()
     builds=output/"slices/variants"
     names=[f"slice.all_statements.{d}_slicing.log" for d in ("forward","backward")]
     references={}
+    runner,runner_key=compiled_runner() if _SLICE_BACKEND=="indexed" else (None,jar_hash)
+    with _GUARD:
+        if cache not in _ALIASES:
+            mapping={}
+            index=cache.parent/"slice-signatures.json"
+            if index.exists():
+                contents=json.loads(index.read_text(encoding="utf8"))
+                if contents["jar"]!=jar_hash:raise ValueError("切片索引的工具版本不符")
+                for item in contents["entries"]:
+                    if (cache/item["raw"]/"complete.json").exists():mapping[item["canonical"]]=item["raw"]
+            _ALIASES[cache]=mapping
+        aliases=_ALIASES[cache]
     # 同一源码和可见频谱只切片一次，切片不读取缺陷日志或标签。
     def one(variant):
-        key=hashlib.sha256((jar_hash+slice_inputs(variant)).encode()).hexdigest()
-        references[variant.name]=cache/key
+        raw,canonical=signatures(variant)
+        original_key=hashlib.sha256((jar_hash+raw).encode()).hexdigest()
         with _GUARD:
-            lock=_LOCKS.setdefault(key,threading.Lock())
+            lock=_LOCKS.setdefault((str(cache),canonical),threading.Lock())
         with lock, _SLICE_SLOTS:
+            key=aliases.get(canonical,original_key)
             target=cache/key
             if not (target/"complete.json").exists():
                 target.mkdir(parents=True,exist_ok=True)
@@ -81,6 +105,12 @@ def slices(source,output,cache):
                     with (target/"slicing.log").open("w") as log:
                         command=[JAVA/"bin/java.exe","-Xmx1024m","-XX:+UseSerialGC",
                                  "-Djava.io.tmpdir="+str(stage),"-Dvariants_dir="+str(stage/"variants"),"-jar",jar]
+                        if _SLICE_BACKEND=="indexed":
+                            command=[JAVA/"bin/java.exe","-Xmx3072m","-XX:+UseSerialGC",
+                                     "-Djava.io.tmpdir="+str(stage),"-Dvariants_dir="+str(stage/"variants"),
+                                     "-Dskip.unexecuted=true","-Dindexed.propagation=true","-cp",
+                                     str(runner)+os.pathsep+str(jar),"SliceProfile",str(product/"src")]
+                        elif _SLICE_BACKEND!="original":raise ValueError("未知切片后端")
                         subprocess.run(command,cwd=stage,stdout=log,stderr=subprocess.STDOUT,check=True,timeout=_SLICE_TIMEOUT)
                     hashes={}
                     for name in names:
@@ -89,7 +119,10 @@ def slices(source,output,cache):
                             raise ValueError("切片格式异常")
                         (target/name).write_bytes(payload)
                         hashes[name]=hashlib.sha256(payload).hexdigest()
-                    atomic_json(target/"complete.json",dict(key=key,files=hashes))
+                    atomic_json(target/"complete.json",dict(key=key,files=hashes,backend=_SLICE_BACKEND,
+                                runner_sha256=runner_key))
+            aliases[canonical]=key
+            references[variant.name]=target
             checked=json.loads((target/"complete.json").read_text(encoding="utf8"))
             dest=builds/variant.name
             dest.mkdir(parents=True,exist_ok=True)
@@ -116,11 +149,33 @@ def observe(system,source,out):
         raise ValueError(f"原始观测不完整 {source}")
     atomic_json(out/"inventory.json",rows)
     expected=[dict(system=system,**r) for r in infer(read_version(source),source.name)]
-    actual,audit=verify_version((system,source))
+    actual,audit=(_AUDIT_POOL.submit(verify_version,(system,source)).result()
+                  if _AUDIT_POOL is not None else verify_version((system,source)))
     if actual!=expected or audit["changed_coverage_counts"]:
         raise ValueError(f"逐用例复算不一致 {source}")
     save_rows(out/"latent.csv",actual)
     atomic_json(out/"coverage-audit.json",audit)
+    return rows
+
+
+def checked_observation_cache(system,source,out,before):
+    """输入未变且当前推断逐值相等时，保留已经完成的逐用例覆盖核验。"""
+    marker=out/"observed.json"
+    if not marker.exists() or json.loads(marker.read_text(encoding="utf8")).get("raw_digest")!=before:
+        return None
+    rows=json.loads((out/"inventory.json").read_text(encoding="utf8"))
+    audit=json.loads((out/"coverage-audit.json").read_text(encoding="utf8"))
+    if audit["changed_coverage_counts"] or audit["tests"]!=sum(len(ts) for r in rows for ts in r["tests"].values()):
+        raise ValueError("既有逐用例覆盖核验凭据不符")
+    with (out/"latent.csv").open(encoding="utf-8-sig",newline="") as stream:
+        saved=list(csv.DictReader(stream))
+    expected=[dict(system=system,**r) for r in infer(read_version(source),source.name)]
+    if len(saved)!=len(expected):raise ValueError("既有推断结果行数不符")
+    for left,right in zip(saved,expected):
+        if set(left)!=set(right):raise ValueError("既有推断列不符")
+        for key,value in right.items():
+            actual=float(left[key]) if isinstance(value,(int,float)) else left[key]
+            if actual!=value:raise ValueError("当前推断与既有核验结果不一致")
     return rows
 
 
@@ -161,7 +216,10 @@ def process_case(job):
             else:
                 atomic_json(out/"construction.json",{})
         observed=out/"observed.json"
-        if observed.exists() and json.loads(observed.read_text(encoding="utf8"))["fingerprint"]==fingerprint:
+        reusable=checked_observation_cache(system,source,out,before) if scenario=="main" else None
+        if reusable is not None:
+            rows=reusable
+        elif observed.exists() and json.loads(observed.read_text(encoding="utf8"))["fingerprint"]==fingerprint:
             rows=json.loads((out/"inventory.json").read_text(encoding="utf8"))
         else:
             rows=observe(system,source,out)
@@ -182,12 +240,14 @@ def process_case(job):
 
 
 def main():
+    global _AUDIT_POOL
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("stage",choices=["run","observe","worker"])
     p.add_argument("--scenario",choices=["main","masked"],default="main")
     p.add_argument("--data",type=Path,default=Path("D:/dataset/whn"))
     p.add_argument("--system",choices=SYSTEMS)
     p.add_argument("--version")
+    p.add_argument("--pending-only",action="store_true",help="仅续跑无完成凭据的案例，最终评价再次核对输入摘要")
     p.add_argument("--workers",type=int,default=6)
     p.add_argument("--source",type=Path)
     p.add_argument("--output",type=Path)
@@ -198,10 +258,12 @@ def main():
                optimize=True)
         return
     jobs=[(s,v,a.scenario,a.stage=="observe") for s in ([a.system] if a.system else SYSTEMS)
-          for v in case_versions(a.data.resolve(),s) if not a.version or v.name==a.version]
+          for v in case_versions(a.data.resolve(),s) if (not a.version or v.name==a.version)
+          and (not a.pending_only or not (results(v,a.scenario)/"complete.json").exists())]
     if not jobs: raise ValueError("没有找到选定版本")
     failures=[]
-    with ThreadPoolExecutor(max_workers=a.workers) as pool:
+    with ProcessPoolExecutor(max_workers=min(4,a.workers)) as auditing, ThreadPoolExecutor(max_workers=a.workers) as pool:
+        _AUDIT_POOL=auditing
         tasks={pool.submit(process_case,j):j for j in jobs}
         for future in as_completed(tasks):
             job=tasks[future]

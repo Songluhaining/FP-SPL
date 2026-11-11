@@ -8,7 +8,7 @@ import tempfile
 
 import pandas as pd
 
-from .case_study import ROOT,SYSTEMS,case_versions,results
+from .case_study import ROOT,SYSTEMS,case_versions,results,raw_digest
 from .compare import run,load_features
 from .compare_latent import KEYS,paired_difference
 from .extension_evaluate import eval_metrics
@@ -51,6 +51,7 @@ def prepare(a):
             rows=json.loads((folder/"inventory.json").read_text(encoding="utf8"))
             audit=json.loads((folder/"coverage-audit.json").read_text(encoding="utf8"))
             complete=json.loads((folder/"complete.json").read_text(encoding="utf8"))
+            if raw_digest(v)!=complete["raw_digest"]:raise ValueError(f"完成后原始输入改变: {v}")
             if a.scenario=="masked":
                 receipt=json.loads((folder/"construction.json").read_text(encoding="utf8"))
                 original=json.loads((results(v,"main")/"inventory.json").read_text(encoding="utf8"))
@@ -146,9 +147,60 @@ def evaluate(a):
                                                 compression={"method":"gzip","mtime":0})
 
 
+def replays(a):
+    """先归档实际执行，再在预测可用时对齐预算内的确认结果。"""
+    outcomes=[]; configurations=[]
+    for system in SYSTEMS:
+        for v in case_versions(a.data,system):
+            root=results(v,"main")
+            receipt=json.loads((root/"replay-complete.json").read_text(encoding="utf8"))
+            plan=json.loads((root/"replay-plan.json").read_text(encoding="utf8"))
+            with (v/"config.report.csv.done").open(encoding="utf-8-sig",newline="") as stream:
+                passed={r[0] for r in list(csv.reader(stream))[1:] if r[-1]=="__PASSED__"}
+            if set(plan)!=passed or receipt["configurations"]!=len(passed):raise ValueError("补测候选配置有遗漏")
+            for cid,strategies in plan.items():
+                keys=strategies["coverage"]
+                executions=json.loads((root/"executions"/(cid+".json")).read_text(encoding="utf8"))["results"]
+                if set(executions)!=set(keys) or len(keys)!=len(set(keys)):raise ValueError("补测用例有遗漏或重复")
+                configurations.append(dict(system=system,version=v.name,configuration=cid,planned=len(keys)))
+                for position,key in enumerate(keys,1):
+                    item=executions[key]
+                    if item["status"]=="confirmed" and not (item["reference"][0]=="passed" and item["first"][0]=="assertion"
+                                                            and item["first"]==item["second"]):
+                        raise ValueError("确认记录不满足参考通过和两次相同断言违例")
+                    outcomes.append(dict(system=system,version=v.name,configuration=cid,position=position,donor_test=key,
+                                         status=item["status"],reference=json.dumps(item.get("reference")),
+                                         first=json.dumps(item.get("first")),second=json.dumps(item.get("second"))))
+    out=pd.DataFrame(outcomes)
+    out.to_csv(a.output/"replay-outcomes.csv",index=False)
+    pd.DataFrame(configurations).to_csv(a.output/"replay-configurations.csv",index=False)
+    counts=[]
+    for budget in (1,3,5):
+        selected=out[out.position<=budget]
+        for system in SYSTEMS:
+            part=selected[selected.system==system]
+            counts.append(dict(system=system,budget=budget,planned_tests=len(part),
+                               with_tests=len(part[KEYS].drop_duplicates()),
+                               confirmed=len(part[part.status=="confirmed"][KEYS].drop_duplicates()),
+                               compile_errors=int((part.status=="compile_error").sum()),
+                               timeouts=int(part.status.str.contains("timeout").sum()),
+                               runtime_errors=int((part.status=="runtime_error").sum())))
+    pd.DataFrame(counts).to_csv(a.output/"replay-budget-counts.csv",index=False)
+    if (a.output/"predictions.csv").exists():
+        predictions=pd.read_csv(a.output/"predictions.csv")
+        summary=[]
+        for row in counts:
+            trials=out[(out.system==row["system"])&(out.position<=row["budget"])]
+            confirmed=trials[trials.status=="confirmed"][KEYS].drop_duplicates()
+            for method,g in predictions[(predictions.protocol=="fivefold")&(predictions.system==row["system"])].groupby("method"):
+                hits=g.merge(confirmed,on=KEYS,validate="one_to_one")
+                summary.append(dict(**row,method=method,detected=int(hits.prediction.sum()),benchmark_negative=int((hits.label==0).sum())))
+        pd.DataFrame(summary).to_csv(a.output/"replay-summary.csv",index=False)
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument("stage",choices=["truth","fit","audit","repeat"])
+    p.add_argument("stage",choices=["truth","fit","audit","repeat","replay"])
     p.add_argument("--scenario",choices=["main","masked"],default="main")
     p.add_argument("--method",choices=["CLAP","PULP"])
     p.add_argument("--data",type=Path,default=Path("D:/dataset/whn"))
@@ -157,6 +209,7 @@ def main():
     a.output=a.output/a.scenario
     a.output.mkdir(parents=True,exist_ok=True)
     if a.stage=="truth":prepare(a)
+    elif a.stage=="replay":replays(a)
     elif a.stage=="audit":evaluate(a)
     elif a.stage=="repeat":
         with tempfile.TemporaryDirectory(dir=a.output) as temp:
