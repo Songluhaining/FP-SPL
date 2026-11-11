@@ -195,7 +195,7 @@ def process_case(job):
     out.mkdir(parents=True,exist_ok=True)
     before=raw_digest(version)
     code=hashlib.sha256()
-    for name in ("case_study.py","baseline_features.py","baseline_cache.py","latent_fault.py","supplement.py","checks/rebuild_latent.py"):
+    for name in ("case_study.py","baseline_features.py","baseline_cache.py","latent_fault.py","supplement.py","test_environment.py","checks/rebuild_latent.py"):
         code.update((ROOT/"fp_research"/name).read_bytes())
     fingerprint=hashlib.sha256((before+code.hexdigest()+scenario).encode()).hexdigest()
     stamp=out/("observed.json" if only_observe else "complete.json")

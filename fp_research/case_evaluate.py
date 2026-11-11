@@ -47,6 +47,7 @@ def prepare(a):
     truth=pd.DataFrame(ground_truth(a.data,SYSTEMS)).assign(converted=0)
     version_rows=[]
     construction=[]
+    environments=[]
     for system in SYSTEMS:
         for v in case_versions(a.data,system):
             folder=results(v,a.scenario)
@@ -70,7 +71,11 @@ def prepare(a):
                 for r in original:
                     if r["outcome"]!="failed": continue
                     c=r["configuration"]
-                    item=receipt.get(c,{"status":"retained_failure"})
+                    item=dict(receipt.get(c,{"status":"retained_failure"}))
+                    environment=item.pop('environment_retry',None)
+                    item['environment_retry']=int(environment is not None)
+                    if environment is not None:
+                        environments.append(dict(system=system,version=v.name,configuration=c,**environment))
                     construction.append(dict(system=system,version=v.name,configuration=c,**item))
                     if item["status"]=="passed":truth.loc[len(truth)]=[system,v.name,c,1,None,base,1]
             selected=truth[(truth.system==system)&(truth.version==v.name)]
@@ -84,6 +89,8 @@ def prepare(a):
     truth.to_csv(a.output/"truth.csv",index=False)
     pd.DataFrame(version_rows).to_csv(a.output/"versions.csv",index=False)
     if construction:pd.DataFrame(construction).to_csv(a.output/"construction.csv",index=False)
+    if environments:
+        (a.output/'construction-environment.json').write_text(json.dumps(environments,ensure_ascii=False),encoding='utf8')
 
 
 def classify(a,target):

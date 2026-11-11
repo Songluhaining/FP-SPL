@@ -59,9 +59,10 @@ def make(root):
          "以下为相对基准标签的识别结果。两个系统分别按缺陷版本固定五折，每个候选恰有一次折外预测，三种方法使用相同候选分母和可见运行证据。",
          performance(main),
          "有监督分类仅使用训练折的真假通过标签。正例与未标注学习调用原装袋学习入口，以训练折的已知失败配置为正例，其余配置保持未标注。贝叶斯诊断使用目标版本内的可见成败与覆盖，沿用既定参数及0.5阈值，没有用新增系统标签调参。",
+         "复现保留原特征公式与分类器，兼容层处理Windows路径、实验输出、十组频谱权重接口及折外分数导出。有监督方法的6列输入、正例与未标注方法的50列输入，以及各折训练样本、抽样比例和源码摘要均已归档。",
          "混淆矩阵按检出、误报、正确排除、漏报顺序展示。精确率、召回率等比例的零分母沿用前次实验记零规则；证据不足的配置保留在候选分母中。排序检查预算为每个版本候选数的十分之一向上取整，无分配置不取得命中。",
          "## 标签口径核对",
-         "基准阳性依据变异日志中的缺陷语句与产品中的特征源码身份匹配，不要求执行次数为正。另以缺陷行的执行或分支计数为正重算标签，分别报告，避免把编入关系直接解释为已复现的规格违例。",
+         "基准阳性依据变异日志中的缺陷语句与产品中的特征源码身份匹配，不要求执行次数为正。下表对同一批预测另按缺陷行的执行或分支计数为正评价，不改变训练标签或重新训练，避免把编入关系直接解释为已复现的规格违例。",
          table(["系统","基准阳性","缺陷行执行过的阳性","基础特征版本"],
                [[SYSTEMS[s],int(g.label.sum()),int(g.executed_label.sum()),g.loc[g.base==1,"version"].nunique()]
                 for s,g in truth.groupby("system")]),
@@ -73,6 +74,7 @@ def make(root):
          performance(main,"external"),
          "## 移除失败用例的补充实验",
          "在每个版本按配置名排序的失败配置中，每隔一个选择一个作转换，保留首个失败配置作参照。实际移除被选配置的失败测试及对应覆盖，在独立环境重新编译并执行留存测试，再从剩余证据重建三种方法的输入。",
+         f"其中{int(construction.get('environment_retry',pd.Series(dtype=float)).sum())}个配置在初次运行出现环境错误后，对隔离编译副本中的临时目录、工作目录和用户目录作本机映射后通过。原测试断言、产品源码及报告不变；真实案例核验确认映射仍保留原有失败，详见environment-verification.json，各次映射与初次错误见补充目录construction-environment.json。",
          table(["系统","原失败配置","实际转换","保留失败参照","无可留存测试","其他失败","移除测试","重跑通过测试"],
                [[SYSTEMS[s],len(g),int((g.status=="passed").sum()),int((g.status=="retained_failure").sum()),
                  int((g.status=="ineligible").sum()),int((~g.status.isin(["passed","retained_failure","ineligible"])).sum()),
@@ -98,7 +100,7 @@ def make(root):
          "## 保存位置与复现",
          "六系统统一表保存为上级目录的“六系统单缺陷实验比较.csv”。主实验和补充实验分别保存逐配置预测、指标、评价标签、训练划分、输入特征、源码摘要及独立核验凭据。所有派生数据均位于原案例内的.fp_research目录或同系统的共享缓存，原源码、测试、覆盖和结果报告保持不变。",
          "两种基线分别在两个场景重训一次，同一随机种子的预测必须逐字节相同。独立统计脚本核对配置无遗漏、无重复、三种方法分母一致，以及训练和评估版本无交叉。等价加速的整表及切片核验见acceleration-verification.json。",
-         "```powershell\n$env:PYTHONUTF8='1'\n$env:OPENBLAS_NUM_THREADS='1'\n$env:FP_SLICE_BACKEND='indexed'\n$env:FP_SLICE_WORKERS='12'\npython -m fp_research.case_study run --workers 8 --pending-only\npython -m fp_research.case_replay --workers 4\npython -m fp_research.case_finish --include-masked\npython -m fp_research.checks.verify_extension experimental_results/gpl_zipme\npython -m fp_research.case_report\npython -m fp_research.result_registry\n```"]
+         "```powershell\n$env:PYTHONUTF8='1'\n$env:OPENBLAS_NUM_THREADS='1'\n$env:FP_SLICE_BACKEND='indexed'\n$env:FP_SLICE_WORKERS='4'\n$env:FP_SLICE_HEAP_MB='1536'\npython -m fp_research.case_study run --workers 4 --pending-only\npython -m fp_research.case_replay --workers 4\npython -m fp_research.case_finish --include-masked\npython -m fp_research.checks.verify_extension experimental_results/gpl_zipme\npython -m fp_research.case_report\npython -m fp_research.result_registry\n```"]
     (root/"实验报告.md").write_text("\n\n".join(raw)+"\n",encoding="utf8")
 
 

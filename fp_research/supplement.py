@@ -12,6 +12,7 @@ import tempfile
 from .inventory import SYSTEMS, atomic_json, records
 from .runtime import LIB, Runtime, command
 from .test_sources import PACKAGE, filtered
+from .test_environment import recompile_scaffolding
 
 
 def stage_file(src,dst):
@@ -76,11 +77,18 @@ def version_stage(job):
                           "org.junit.platform.console.ConsoleLauncher","--details=summary","--disable-ansi-colors"]
                     for cls in classes:
                         args.extend(["--select-class",cls])
-                    log=command(args,working)
+                    compatibility={}
+                    try:
+                        log=command(args,working)
+                    except RuntimeError as original:
+                        # 生成器记录了Linux环境路径；只重编译隔离副本中的环境初始化。
+                        mapping=recompile_scaffolding(rt,target,working,main,tests)
+                        log=command(args,working)
+                        compatibility=dict(environment_retry=dict(original_error=str(original),mapping=mapping))
                     success=re.search(r"(\d+) tests? successful\s*\]",log)
                     if not success or int(success[1])!=len(row["tests"]["passed"]):
                         raise ValueError("剩余通过数量与原记录不一致")
-                    checks[name]={"status":"passed","removed":len(row["tests"]["failed"]),"remaining":int(success[1])}
+                    checks[name]={"status":"passed","removed":len(row["tests"]["failed"]),"remaining":int(success[1]),**compatibility}
                 except (RuntimeError,ValueError) as ex:
                     checks[name]={"status":"verification_error","reason":str(ex)}
     for row in raw[1:]:
