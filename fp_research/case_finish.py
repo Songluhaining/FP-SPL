@@ -102,6 +102,7 @@ def main():
                            for v in case_versions(a.data,s)) for s in SYSTEMS})
                     time.sleep(30)
                 check_masked_processes()
+            status("正在评价",scenario=scenario)
             command("case_evaluate","truth","--scenario",scenario,"--data",str(a.data))
             for method in ("CLAP","PULP"):
                 command("case_evaluate","fit","--method",method,"--scenario",scenario,"--data",str(a.data))

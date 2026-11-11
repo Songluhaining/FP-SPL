@@ -88,7 +88,7 @@ def make(root):
                  f"{main[(main.system==r.system)&(main.method=='configuration')&(main.protocol=='fivefold')&(main.subset=='all')].iloc[0].f1:.2%}",
                  f"{main[(main.system==r.system)&(main.method=='statement')&(main.protocol=='fivefold')&(main.subset=='all')].iloc[0].f1:.2%}",
                  METHODS[r.baseline],f"{100*r.lower:+.2f}至{100*r.upper:+.2f}个百分点"] for r in ci.itertuples()]),
-         "区间按系统内缺陷版本配对、有放回重采样一万次得到。区间跨零时，不能仅据点估计认定稳定提升。配置编入关系与基准标签定义密切相关，需结合执行标签和实际补测理解结果。",
+         "区间表示贝叶斯诊断相对该行比较方法的调和平均值差异，按系统内缺陷版本配对、有放回重采样一万次得到。区间跨零时，不能仅据点估计认定稳定提升。配置编入关系与基准标签定义密切相关，需结合执行标签和实际补测理解结果。",
          "## 实际补测",
          "三种方法共享与预测分数及标签无关的固定候选池和选例顺序。候选测试须在同特征参考产品上通过，且在目标配置的两次独立运行中触发同一断言违例，才记为确认；编译失败、超时和运行异常不计为确认。",
          table(["系统","每配置预算","有候选配置","实际候选测试","确认配置","编译失败","超时","运行异常","参考断言不通过",
@@ -101,9 +101,10 @@ def make(root):
          "图处理参考源码来自[官方示例的固定版本](https://github.com/FeatureIDE/FeatureIDE/tree/d769691754fd63cf757902fc1b3daf28d9333535/plugins/de.ovgu.featureide.examples/featureide_examples/GPL-FH-Java)，57份源码均已与未受相应变异影响的本地文件核对。参考源码缺失是共享模板问题，原105个案例的产品源码及测试完整。",
          "压缩系统的45份参考源码也已逐份交叉核对，每份均至少有两个原始案例提供除换行外完全一致的未变异内容，见zipme-reference-verification.json。",
          "## 保存位置与复现",
-         "六系统统一表保存为上级目录的“六系统单缺陷实验比较.csv”。主实验和补充实验分别保存逐配置预测、指标、评价标签、训练划分、输入特征、源码摘要及独立核验凭据。所有派生数据均位于原案例内的.fp_research目录或同系统的共享缓存，原源码、测试、覆盖和结果报告保持不变。",
+         "六系统统一表保存为上级目录的“六系统单缺陷实验比较.csv”。主实验和补充实验分别保存逐配置预测、指标、评价标签、训练划分、输入特征、源码摘要及独立核验凭据。产品构建、切片缓存和临时测试视图保存在案例或同系统的.fp_research目录，汇总结果归档在当前仓库；原源码、测试、覆盖和结果报告保持不变。",
+         "运行环境版本见runtime.json；各场景的raw-input-verification.json记录全部160个版本逐文件核验后的原始输入摘要。最终的completion-verification.json核对两个场景输入一致、全部案例完成，以及六系统统一表中的既有结果未被改写。",
          "两种基线分别在两个场景重训一次，同一随机种子的预测必须逐字节相同。独立统计脚本核对配置无遗漏、无重复、三种方法分母一致，以及训练和评估版本无交叉。等价加速的整表及切片核验见acceleration-verification.json。",
-         "```powershell\n$env:PYTHONUTF8='1'\n$env:OPENBLAS_NUM_THREADS='1'\n$env:FP_SLICE_BACKEND='indexed'\n$env:FP_SLICE_WORKERS='4'\n$env:FP_SLICE_HEAP_MB='1536'\npython -m fp_research.case_study run --workers 4 --pending-only\npython -m fp_research.case_replay --workers 4\npython -m fp_research.case_finish --include-masked\npython -m fp_research.checks.verify_extension experimental_results/gpl_zipme\npython -m fp_research.case_report\npython -m fp_research.result_registry\n```"]
+         "```powershell\n$env:PYTHONUTF8='1'\n$env:OPENBLAS_NUM_THREADS='1'\n$env:FP_SLICE_BACKEND='indexed'\n$env:FP_SLICE_WORKERS='4'\n$env:FP_SLICE_HEAP_MB='1536'\npython -m fp_research.case_study run --workers 4 --pending-only\npython -m fp_research.case_replay --workers 4\npython -m fp_research.case_finish --include-masked\npython -m fp_research.checks.verify_extension experimental_results/gpl_zipme\npython -m fp_research.case_report\npython -m fp_research.result_registry\npython -m fp_research.checks.verify_case_completion\n```"]
     (root/"实验报告.md").write_text("\n\n".join(raw)+"\n",encoding="utf8")
 
 
