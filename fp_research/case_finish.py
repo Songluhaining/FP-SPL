@@ -21,6 +21,7 @@ def main():
     p.add_argument("--data",type=Path,default=Path("D:/dataset/whn"))
     p.add_argument("--include-masked",action="store_true")
     p.add_argument("--wait-main-pid",action="append",default=[],help="等待已有主实验进程退出，格式为系统:进程号")
+    p.add_argument("--wait-masked-pid",action="append",default=[],help="接续已有补充实验进程；不阻塞主实验评价，格式为系统:进程号")
     a=p.parse_args()
     output=ROOT/"experimental_results/gpl_zipme"
     output.mkdir(parents=True,exist_ok=True)
@@ -28,17 +29,21 @@ def main():
     registry=ROOT/"experimental_results/六系统单缺陷实验比较.csv"
     env=os.environ.copy()
     env.update(PYTHONUTF8="1",OPENBLAS_NUM_THREADS="1")
-    main_processes=[]
-    for item in a.wait_main_pid:
-        system,pid=item.split(":",1)
-        if system not in SYSTEMS:raise ValueError("等待进程的系统名称错误")
-        try:
-            process=psutil.Process(int(pid))
-            main_processes.append((system,process,process.create_time()))
-        except psutil.NoSuchProcess:pass
-    def active_main():
+    def track(items):
+        tracked=[]
+        for item in items:
+            system,pid=item.split(":",1)
+            if system not in SYSTEMS:raise ValueError("等待进程的系统名称错误")
+            try:
+                process=psutil.Process(int(pid))
+                tracked.append((system,process,process.create_time()))
+            except psutil.NoSuchProcess:pass
+        return tracked
+    main_processes=track(a.wait_main_pid)
+    external_masked=track(a.wait_masked_pid)
+    def active_processes(tracked):
         active=set()
-        for system,process,created in main_processes:
+        for system,process,created in tracked:
             try:
                 if process.is_running() and process.create_time()==created:active.add(system)
             except psutil.NoSuchProcess:pass
@@ -53,6 +58,7 @@ def main():
     masked_logs=[]
     def start_masked(system):
         if system in masked_processes:return
+        if system in active_processes(external_masked):return
         pending=[v for v in case_versions(a.data,system) if not (results(v,"masked")/"complete.json").exists()]
         if not pending:
             masked_processes[system]=None
@@ -72,14 +78,15 @@ def main():
         while True:
             counts={s:sum((results(v,"main")/"complete.json").exists() for v in case_versions(a.data,s)) for s in SYSTEMS}
             totals={s:len(case_versions(a.data,s)) for s in SYSTEMS}
-            active=active_main()
+            active=active_processes(main_processes)
             if a.include_masked:
                 for system in SYSTEMS:
                     # 同系统主实验不再写切片缓存后，才启动该系统补充实验。
                     if counts[system]==totals[system] and system not in active:start_masked(system)
                 check_masked_processes()
             if counts==totals and not active:break
-            status("等待所有主实验案例准备完成",completed=counts,total=totals,active_main=sorted(active))
+            status("等待所有主实验案例准备完成",completed=counts,total=totals,active_main=sorted(active),
+                   active_masked=sorted(active_processes(external_masked)))
             if time.monotonic()-last_refresh>600:
                 make(a.data,registry)
                 last_refresh=time.monotonic()
@@ -87,8 +94,10 @@ def main():
         for scenario in (["main","masked"] if a.include_masked else ["main"]):
             status("正在评价",scenario=scenario)
             if scenario=="masked":
-                while any(p is not None and p.poll() is None for p in masked_processes.values()):
+                while True:
+                    for system in SYSTEMS:start_masked(system)
                     check_masked_processes()
+                    if not active_processes(external_masked) and not any(p is not None and p.poll() is None for p in masked_processes.values()):break
                     status("主实验已核验；等待补充实验准备完成",completed={s:sum((results(v,"masked")/"complete.json").exists()
                            for v in case_versions(a.data,s)) for s in SYSTEMS})
                     time.sleep(30)
@@ -99,7 +108,9 @@ def main():
                 command("case_evaluate","repeat","--method",method,"--scenario",scenario,"--data",str(a.data))
             command("case_evaluate","audit","--scenario",scenario,"--data",str(a.data))
             verify(output/scenario)
-            if scenario=="main":command("case_evaluate","replay","--data",str(a.data))
+            if scenario=="main":
+                command("case_evaluate","replay","--data",str(a.data))
+                command("checks.verify_case_replay")
             atomic_json(output/scenario/"registry-verified.json",dict(retraining="逐字节一致",independent_statistics="通过",
                         metrics_sha256=hashlib.sha256((output/scenario/"metrics.csv").read_bytes()).hexdigest(),
                         predictions_sha256=hashlib.sha256((output/scenario/"predictions.csv").read_bytes()).hexdigest()))
