@@ -1,0 +1,13 @@
+﻿stratum,version,points,sparsity,particles,max_score_difference,changed_predictions,expected_mechanisms
+1,_MultipleBugs_.NOB_1.ID_31,17,1.5,1024,0.0146484375,0,1.091796875
+1,_MultipleBugs_.NOB_1.ID_31,33,1.5,1024,0.0126953125,0,1.1005859375
+1,_MultipleBugs_.NOB_1.ID_31,9,0.5,1024,0.0361328125,0,1.0185546875
+1,_MultipleBugs_.NOB_1.ID_31,9,3.0,1024,0.064453125,0,1.1953125
+2,_MultipleBugs_.NOB_2.ID_182,17,1.5,1024,0.005859375,0,3.337890625
+2,_MultipleBugs_.NOB_2.ID_182,33,1.5,1024,0.0087890625,0,3.33203125
+2,_MultipleBugs_.NOB_2.ID_182,9,0.5,1024,0.02734375,0,3.0546875
+2,_MultipleBugs_.NOB_2.ID_182,9,3.0,1024,0.044921875,0,3.6591796875
+3,_MultipleBugs_.NOB_3.ID_12,17,1.5,1024,0.0,0,2.341796875
+3,_MultipleBugs_.NOB_3.ID_12,33,1.5,1024,0.0,0,2.333984375
+3,_MultipleBugs_.NOB_3.ID_12,9,0.5,1024,0.0,0,2.16015625
+3,_MultipleBugs_.NOB_3.ID_12,9,3.0,1024,0.0,0,2.751953125
