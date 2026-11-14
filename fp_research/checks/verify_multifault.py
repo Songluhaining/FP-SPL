@@ -105,6 +105,9 @@ def main():
         if row['subset']=='all_base': part=part[part.base==1]
         elif row['subset']=='other': part=part[part.base==0]
         check(part,row)
+        if row['method']=='joint':
+            if row['unstable']!=int((part.stable==0).sum()) or row['ambiguous']!=int(((part.lower<.5)&(part.upper>=.5)).sum()):
+                raise ValueError('采样稳定性或识别区间统计不符')
     now = datetime.now().astimezone().isoformat()
     chinese = []
     for row in metrics.to_dict('records'):
@@ -115,6 +118,7 @@ def main():
             评价子集={'all':'全部','executed':'缺陷行实际执行标签','all_base':'全部故障均在基础特征','other':'至少一个故障在其他特征'}[row['subset']],
             完成状态='已完成并独立复算核验',总缺陷版本数=len(selected),全部配置数=sum(j['configurations'] for j in selected),
             **{zh:row[k] for k,zh in METRICS.items()},
+            采样未稳定配置数=row['unstable'],区间跨阈值配置数=row['ambiguous'],
             原始通过配置数=sum(j['candidates'] for j in selected),
             结果来源=str(OUTPUT/'metrics.csv'),预测明细来源=str(OUTPUT/'predictions.csv'),
             来源文件摘要=digest(OUTPUT/'predictions.csv'),更新时间=now,

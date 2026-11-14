@@ -47,7 +47,7 @@ def folder(job):
 def code_hash(stage):
     names = ['joint_fault.py', 'joint_inputs.py', 'latent_fault.py', 'inventory.py'] if stage == 'joint' else [
         'case_study.py', 'baseline_features.py', 'baseline_cache.py', 'slice_runner.py', 'slice_reuse.py',
-        'checks/SliceProfile.java']
+        'checks/SliceProfile.java', 'multifault_cache.py']
     return {n: digest(ROOT / 'fp_research' / n) for n in names}
 
 
@@ -133,7 +133,7 @@ def prepare(job):
     stamp = out / 'baselines.json'
     if stamp.exists():
         old = read(stamp)
-        if old['raw_digest'] == before and old['code'] == code_hash('baseline'):
+        if old['raw_digest'] == before and old['code'] == code_hash('baseline') and 'reused_legacy_products' in old:
             for m in ('CLAP', 'PULP'):
                 if digest(out / m / 'features.csv') != old['features'][m]: raise ValueError('特征缓存改变')
                 load_features(out, m)
@@ -142,6 +142,8 @@ def prepare(job):
     if any(not (r['coverage_agrees'] and r['source'] and r['test_source']) for r in rows):
         raise ValueError('观测数据不完整')
     atomic_json(out / 'inventory.json', rows)
+    from .multifault_cache import seed
+    reused = seed(v)
     slices(v, out, v.parent / '.fp_research/slice-cache')
     for m in ('CLAP', 'PULP'):
         features(v, out, m)
@@ -152,7 +154,7 @@ def prepare(job):
         if any((actual[r['configuration']] == 'F') != (r['outcome'] == 'failed') for r in rows if r['configuration'] in actual):
             raise ValueError('基线可见标签不符')
     if raw_digest(v) != before: raise ValueError('基线准备改变原始文件')
-    atomic_json(stamp, dict(raw_digest=before, code=code_hash('baseline'),
+    atomic_json(stamp, dict(raw_digest=before, code=code_hash('baseline'), reused_legacy_products=reused,
                            features={m: digest(out / m / 'features.csv') for m in ('CLAP', 'PULP')}))
     return 'verified'
 
@@ -189,15 +191,33 @@ def labels(jobs):
 
 def classify(jobs, method):
     import pandas as pd
-    from .compare import run
-    truth = pd.read_csv(OUTPUT / 'truth.csv')
-    mapping = dict(zip(truth[KEYS].itertuples(index=False, name=None), truth.label)) if method == 'CLAP' else {}
+    from .compare import run, load_features
+    mapping = {}
+    if method == 'CLAP':
+        truth = pd.read_csv(OUTPUT / 'truth.csv')
+        mapping = dict(zip(truth[KEYS].itertuples(index=False, name=None), truth.label))
     splits, identities = partitions(jobs)
     # 各折即时归档，避免完成几十折之后因一折中断而丢失全部输出。
-    parts = []
+    parts = []; training_receipts = []
     for split in splits:
         target = OUTPUT / 'fold_predictions' / f'{method}-{split[0]}.csv'
+        observed = []; train_labels = []; feature_inputs = []
+        for path in split[1]:
+            ids, obs, table = load_features(path, method)
+            observed.extend(obs)
+            if method == 'CLAP': train_labels.extend(mapping[(*identities[path], cid)] for cid in ids)
+            feature_inputs.append(dict(system=identities[path][0], version=identities[path][1],
+                                       sha256=digest(path/method/'features.csv'), configurations=ids))
         run(None, ROOT.parent / method, method, mapping, target, partitions=[split], identities=identities)
+        positive=observed.count('F'); unlabeled=len(observed)-positive
+        training_receipts.append(dict(split=split[0], method=method, rows=len(observed),
+            columns=6 if method=='CLAP' else 50, known_failure_positives=positive if method=='PULP' else None,
+            training_true_positives=sum(train_labels) if method=='CLAP' else None,
+            sampling_ratio=(positive+1e-6)/unlabeled if method=='PULP' else None,
+            sampled_unlabeled_per_estimator=int(unlabeled*((positive+1e-6)/unlabeled)) if method=='PULP' else None,
+            estimators=30 if method=='PULP' else 1, seed=42 if method=='PULP' else None, input_files=feature_inputs,
+            testing=[dict(system=identities[p][0],version=identities[p][1]) for p in split[2]], output_sha256=digest(target)))
+        atomic_json(OUTPUT / f'{method}-training.json', training_receipts)
         parts.append(pd.read_csv(target))
     pd.concat(parts, ignore_index=True).to_csv(OUTPUT / f'{method}.csv', index=False)
 
@@ -227,7 +247,10 @@ def evaluate(jobs):
     for (system, stratum, method), part in frame.groupby(['system', 'stratum', 'method']):
         for subset, sub, label in [('all', part, 'label'), ('executed', part, 'executed_label'),
                                     ('all_base', part[part.base==1], 'label'), ('other', part[part.base==0], 'label')]:
-            if len(sub): tables.append(dict(system=system, stratum=int(stratum), method=method, subset=subset, **eval_metrics(sub, label)))
+            if len(sub): tables.append(dict(system=system, stratum=int(stratum), method=method, subset=subset,
+                unstable=int((sub.stable==0).sum()) if method=='joint' else None,
+                ambiguous=int(((sub.lower<.5)&(sub.upper>=.5)).sum()) if method=='joint' else None,
+                **eval_metrics(sub, label)))
     frame.to_csv(OUTPUT / 'predictions.csv', index=False)
     pd.DataFrame(tables).to_csv(OUTPUT / 'metrics.csv', index=False)
     versions = []

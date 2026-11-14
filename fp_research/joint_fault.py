@@ -58,12 +58,12 @@ def log_likelihood(survival,e):
     return survival@e.passed + np.log(-np.expm1(survival))@e.failed
 
 
-def conditional_likelihood(base,execution,passed,failed,logs):
+def conditional_likelihood(base,execution,passed,failed,logs,passing_count=None):
     """仅计算依赖当前变量的项；通过证据线性汇总，失败证据保留逐行计算。"""
     affected=(execution>0)&(failed>0)
     failures=failed[affected]
     local=base[:,affected]
-    passing=float(execution@passed)
+    passing=float(execution@passed) if passing_count is None else float(passing_count)
     return np.column_stack([x*passing+np.log(-np.expm1(local+x))@failures for x in logs])
 
 
@@ -109,9 +109,15 @@ def infer_joint(e,particles=256,points=9,sparsity=1.5,seed=42,sweeps=2):
     states=np.zeros((particles,g),dtype=np.int16)
     for j in range(g):
         states[:,j]=rng.choice(points+1,size=particles,p=np.exp(prior[j]))
-    a=e.execution.astype(float)
+    # 通过项在对数域为线性项，只保留每个候选的通过覆盖次数。
+    # 非线性的失败项仍保留全部原始执行模式及其次数。
+    failing=e.failed>0
+    a=e.execution[failing].astype(float)
+    failed=e.failed[failing]
+    passed_hits=e.execution.T@e.passed
+    passed_log=np.log1p(-epsilon)*e.passed.sum()+logs[states]@passed_hits
     survival=np.log1p(-epsilon)+logs[states]@a.T
-    ll=log_likelihood(survival,e)
+    ll=passed_log+np.log(-np.expm1(survival))@failed
     beta=0.;logz=0.;trace=[]
     while beta<1-1e-12:
         if len(trace)>=256:
@@ -135,17 +141,18 @@ def infer_joint(e,particles=256,points=9,sparsity=1.5,seed=42,sweeps=2):
         logz+=float(logsumexp(delta*ll)-np.log(particles))
         ids=np.searchsorted(np.cumsum(w),(rng.random()+np.arange(particles))/particles)
         ids=np.minimum(ids,particles-1)
-        states=states[ids].copy();survival=survival[ids].copy();ll=ll[ids].copy()
+        states=states[ids].copy();survival=survival[ids].copy();ll=ll[ids].copy();passed_log=passed_log[ids].copy()
         beta=min(1.,beta+delta)
         swaps=0
         for _ in range(sweeps):
             for j in rng.permutation(g):
                 base=survival-logs[states[:,j,None]]*a[None,:,j]
-                conditional=conditional_likelihood(base,a[:,j],e.passed,e.failed,logs)
+                conditional=conditional_likelihood(base,a[:,j],None,failed,logs,passing_count=passed_hits[j])
                 proposed=ll[:,None]+conditional-conditional[np.arange(particles),states[:,j],None]
                 probabilities=softmax(beta*conditional+prior[j],axis=1)
                 draw=(rng.random((particles,1))>np.cumsum(probabilities,axis=1)).sum(axis=1)
                 draw=np.minimum(draw,points)
+                passed_log+=(logs[draw]-logs[states[:,j]])*passed_hits[j]
                 states[:,j]=draw
                 survival=base+logs[draw,None]*a[None,:,j]
                 ll=proposed[np.arange(particles),draw]
@@ -156,12 +163,13 @@ def infer_joint(e,particles=256,points=9,sparsity=1.5,seed=42,sweeps=2):
                 row=np.arange(particles)
                 sj=states[row,j].copy();sk=states[row,k].copy()
                 prop=survival+(logs[sk]-logs[sj])[:,None]*(a[:,j]-a[:,k]).T
-                pll=log_likelihood(prop,e)
+                ppassed=passed_log+(logs[sk]-logs[sj])*(passed_hits[j]-passed_hits[k])
+                pll=ppassed+np.log(-np.expm1(prop))@failed
                 ratio=beta*(pll-ll)+prior[j,sk]+prior[k,sj]-prior[j,sj]-prior[k,sk]
                 accepted=np.log(rng.random(particles))<ratio
                 r=row[accepted]
                 states[r,j[accepted]]=sk[accepted];states[r,k[accepted]]=sj[accepted]
-                survival[accepted]=prop[accepted];ll[accepted]=pll[accepted]
+                survival[accepted]=prop[accepted];ll[accepted]=pll[accepted];passed_log[accepted]=ppassed[accepted]
                 swaps+=int(accepted.sum())
         trace.append(dict(beta=beta,ess=float(1/np.sum(w*w)),unique=int(len(np.unique(states,axis=0))),swaps=swaps))
     return dict(**risks(states,e),log_evidence=logz,trace=trace,

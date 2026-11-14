@@ -4,13 +4,17 @@
     "scores_identical": true,
     "particles_identical": true,
     "before_seconds": 400.5319999998901,
-    "after_seconds": 29.110000000102445
+    "after_seconds": 29.110000000102445,
+    "compact_particles_identical": true,
+    "compact_seconds": 17.733999999938533
   },
   {
     "version": "_MultipleBugs_.NOB_3.ID_1",
     "scores_identical": true,
     "particles_identical": true,
     "before_seconds": 405.5779999999795,
-    "after_seconds": 29.108999999938533
+    "after_seconds": 29.108999999938533,
+    "compact_particles_identical": true,
+    "compact_seconds": 17.437999999849126
   }
 ]
