@@ -70,7 +70,7 @@ def manifest():
                 jobs.append(dict(system=system, stratum=stratum, version=v.name, path=str(v),
                                  configurations=len(rows), candidates=states.count('__PASSED__'),
                                  report_sha256=digest(v / 'config.report.csv.done')))
-    spec = dict(jobs=jobs, parameters=PARAMETERS, seeds=SEEDS, threshold=.5,
+    spec = dict(jobs=jobs, parameters=PARAMETERS, seeds=list(SEEDS), threshold=.5,
                 joint_protocol='每个案例单独推断；不输入真实故障数量或评价标签；两种种子平均',
                 stability='最大候选分差>0.05时依次增加到1024、4096粒子；仍不稳则明确标记',
                 baseline_protocol='各系统的双缺陷与三缺陷分别按版本固定五折；仅训练折标签供CLAP使用',
@@ -78,21 +78,26 @@ def manifest():
                 deferred=location['deferred_multifault'])
     OUTPUT.mkdir(parents=True, exist_ok=True)
     target = OUTPUT / 'manifest.json'
-    if target.exists() and read(target)['jobs'] != jobs:
-        raise ValueError('输入清单改变，请先核对已有实验，不能静默覆盖')
+    if target.exists():
+        old=read(target)
+        if old['jobs'] != jobs:
+            raise ValueError('输入清单改变，请先核对已有实验，不能静默覆盖')
+        if old==spec and (OUTPUT/'inventory.csv').exists():return jobs
     atomic_json(target, spec)
     write_csv(OUTPUT / 'inventory.csv', jobs)
     return jobs
 
 
 def fit(job):
+    from threadpoolctl import threadpool_limits
+    threadpool_limits(limits=1)
     started = time.monotonic()
     v = Path(job['path']); out = folder(job)
     out.mkdir(parents=True, exist_ok=True)
     marker = out / 'joint.json'
     if marker.exists():
         old = read(marker)
-        if old['code'] == code_hash('joint') and old['parameters'] == PARAMETERS:
+        if old['code'] == code_hash('joint') and old['parameters'] == PARAMETERS and old.get('numerical_threads')==1:
             verify_unchanged(v, read(out / 'evidence.json'))
             for name, sha in old['artifacts'].items():
                 if digest(out / name) != sha: raise ValueError('联合缓存摘要不符')
@@ -117,7 +122,7 @@ def fit(job):
     write_csv(out / 'joint.csv', predictions)
     np.savez_compressed(out / 'posterior-states.npz', **{f'seed{s}': r['states'] for s, r in zip(SEEDS, runs)})
     verify_unchanged(v, info)
-    atomic_json(marker, dict(code=code_hash('joint'), parameters=PARAMETERS, attempts=attempts,
+    atomic_json(marker, dict(code=code_hash('joint'), parameters=PARAMETERS, attempts=attempts,numerical_threads=1,
         stable=difference <= .05, seconds=time.monotonic()-started, tests=info['tests'], classes=len(info['classes']),
         patterns=info['patterns'], runs=[{k: r[k] for k in ('seed', 'particles', 'trace', 'epsilon', 'log_evidence')} for r in runs],
         artifacts={n: digest(out / n) for n in ('evidence.json', 'evidence.npz', 'joint.csv', 'posterior-states.npz')}))
@@ -133,7 +138,7 @@ def prepare(job):
     stamp = out / 'baselines.json'
     if stamp.exists():
         old = read(stamp)
-        if old['raw_digest'] == before and old['code'] == code_hash('baseline') and 'reused_legacy_products' in old:
+        if old['raw_digest'] == before and old['code'] == code_hash('baseline') and 'reused_legacy_products' in old and old.get('numerical_threads')==1:
             for m in ('CLAP', 'PULP'):
                 if digest(out / m / 'features.csv') != old['features'][m]: raise ValueError('特征缓存改变')
                 load_features(out, m)
@@ -143,7 +148,7 @@ def prepare(job):
         raise ValueError('观测数据不完整')
     atomic_json(out / 'inventory.json', rows)
     from .multifault_cache import seed
-    reused = seed(v)
+    reused = seed(v,before)
     slices(v, out, v.parent / '.fp_research/slice-cache')
     for m in ('CLAP', 'PULP'):
         features(v, out, m)
@@ -154,7 +159,7 @@ def prepare(job):
         if any((actual[r['configuration']] == 'F') != (r['outcome'] == 'failed') for r in rows if r['configuration'] in actual):
             raise ValueError('基线可见标签不符')
     if raw_digest(v) != before: raise ValueError('基线准备改变原始文件')
-    atomic_json(stamp, dict(raw_digest=before, code=code_hash('baseline'), reused_legacy_products=reused,
+    atomic_json(stamp, dict(raw_digest=before, code=code_hash('baseline'), reused_legacy_products=reused,numerical_threads=1,
                            features={m: digest(out / m / 'features.csv') for m in ('CLAP', 'PULP')}))
     return 'verified'
 
@@ -182,14 +187,21 @@ def labels(jobs):
         selected = [j for j in jobs if (j['system'], j['stratum']) == (system, stratum)]
         root = Path(selected[0]['path']).parent
         rows = list(ground_truth(root.parent, {system: (root.name,)}))
+        any_base={}
+        for j in selected:
+            v=Path(j['path'])
+            features={line.split(':',1)[0].split('.',1)[0] for line in (v/(v.name+'.mutant.log')).read_text(encoding='utf8').splitlines()}
+            any_base[j['version']]=int(bool(features & {'BankAccount','Base','ExamDB'}))
         expected = {(j['version'], r['configuration']) for j in selected for r in records(Path(j['path'])) if r['outcome']=='passed'}
         if len(rows) != len(expected) or {(r['version'], r['configuration']) for r in rows} != expected:
             raise ValueError('评价真值清单不符')
-        values.extend(dict(**r, stratum=stratum) for r in rows)
+        values.extend(dict(**r, stratum=stratum, any_base=any_base[r['version']]) for r in rows)
     write_csv(OUTPUT / 'truth.csv', values)
 
 
 def classify(jobs, method):
+    from threadpoolctl import threadpool_limits
+    threadpool_limits(limits=1)
     import pandas as pd
     from .compare import run, load_features
     mapping = {}
@@ -246,7 +258,8 @@ def evaluate(jobs):
     tables = []
     for (system, stratum, method), part in frame.groupby(['system', 'stratum', 'method']):
         for subset, sub, label in [('all', part, 'label'), ('executed', part, 'executed_label'),
-                                    ('all_base', part[part.base==1], 'label'), ('other', part[part.base==0], 'label')]:
+                                    ('all_base', part[part.base==1], 'label'), ('other', part[part.base==0], 'label'),
+                                    ('any_base', part[part.any_base==1], 'label'), ('no_base', part[part.any_base==0], 'label')]:
             if len(sub): tables.append(dict(system=system, stratum=int(stratum), method=method, subset=subset,
                 unstable=int((sub.stable==0).sum()) if method=='joint' else None,
                 ambiguous=int(((sub.lower<.5)&(sub.upper>=.5)).sum()) if method=='joint' else None,

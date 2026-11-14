@@ -67,14 +67,28 @@ def load_index(base):
     return data['entries']
 
 
-def seed(version):
+def seed(version,raw_digest=None):
     from . import case_study as study
+    from .slice_runner import compiled_runner
     entries=load_index(version.parent.parent)
-    if not entries:return 0
     cache=version.parent/'.fp_research/slice-cache'
-    count=0
+    output=version/'.fp_research/multifault_joint'
+    previous={};stamp=output/'baselines.json';references=output/'slice-cache.json'
+    if stamp.exists() and references.exists() and json.loads(stamp.read_text(encoding='utf8'))['raw_digest']==raw_digest:
+        previous=json.loads(references.read_text(encoding='utf8'))
+    runner_key=compiled_runner()[1] if previous else None
+    count=0;restored=0
     for variant in sorted((version/'variants').iterdir()):
         _,canonical=signatures(variant)
+        prior=Path(previous[variant.name]) if variant.name in previous else None
+        if prior is not None and prior.parent==cache and (prior/'complete.json').exists():
+            proof=json.loads((prior/'complete.json').read_text(encoding='utf8'))
+            compatible=(proof.get('runner_sha256')==runner_key or
+                        proof.get('backend')=='verified-legacy' and proof.get('canonical')==canonical)
+            if compatible and all(sha(prior/name)==value for name,value in proof['files'].items()):
+                with study._GUARD:study._ALIASES.setdefault(cache,{})[canonical]=prior.name
+                restored+=1;count+=int(proof.get('backend')=='verified-legacy')
+                continue
         item=entries.get(canonical)
         if item is None:continue
         # 对已经实际运行过的新产品，额外核对完整前向、后向切片集合。
@@ -103,6 +117,7 @@ def seed(version):
                     source=item['source'],input_sha256=item['raw_input'],canonical=canonical))
             with study._GUARD: study._ALIASES.setdefault(cache,{})[canonical]=key
             count+=1
+    atomic_json(output/'slice-resume.json',dict(restored_products=restored,legacy_products=count))
     return count
 
 

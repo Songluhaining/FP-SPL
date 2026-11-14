@@ -182,7 +182,8 @@ def checked_observation_cache(system,source,out,before):
 
 def features(source,out,method):
     env=os.environ.copy()
-    env.update(TEMP=str(out),TMP=str(out),PYTHONUTF8="1",OPENBLAS_NUM_THREADS="1")
+    env.update(TEMP=str(out),TMP=str(out),PYTHONUTF8="1",OPENBLAS_NUM_THREADS="1",
+               MKL_NUM_THREADS="1",OMP_NUM_THREADS="1",NUMEXPR_NUM_THREADS="1")
     args=[sys.executable,"-m","fp_research.case_study","worker","--source",str(source),
           "--output",str(out),"--method",method]
     with (out/(method+"-run.log")).open("w",encoding="utf8") as log:
