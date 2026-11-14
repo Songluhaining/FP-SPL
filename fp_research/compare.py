@@ -25,7 +25,7 @@ def load_features(version,method):
 
 
 def run(root,repo,method,truth,target,only=None,systems=("bank", "email"),extra_splits=(),
-        partitions=None,identities=None):
+        partitions=None,identities=None,pu_sampling_ratio=None):
     sys.path.insert(0,str(repo.resolve()))
     if method=="CLAP":
         import PassingVariants_Classification as implementation
@@ -46,7 +46,7 @@ def run(root,repo,method,truth,target,only=None,systems=("bank", "email"),extra_
         X=pd.concat(x)
         if method=="PULP":
             positive=y.count("F")
-            ratio=(positive+1.e-6)/(len(y)-positive)
+            ratio=(positive+1.e-6)/(len(y)-positive) if pu_sampling_ratio is None else pu_sampling_ratio
             model=PUBaggingLearning(sampling_ratio=ratio,random_state=42)
             model.prepare_data(X.to_numpy(),y,None)
             model.predict()

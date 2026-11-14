@@ -9,7 +9,7 @@ from fp_research.inventory import atomic_json
 def main():
     from threadpoolctl import threadpool_limits
     threadpool_limits(limits=1)
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--method',choices=['CLAP','PULP'],required=True)
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--method',choices=['CLAP','PULP','PULP-default'],required=True)
     method=p.parse_args().method
     jobs=read(OUTPUT/'manifest.json')['jobs'];splits,identities=partitions(jobs)
     mapping={}
@@ -20,7 +20,9 @@ def main():
     for split in splits:
         if not split[0].endswith('fold0'):continue
         target=ROOT/'result/multifault_validation/repeated'/f'{method}-{split[0]}.csv'
-        run(None,ROOT.parent/method,method,mapping,target,partitions=[split],identities=identities)
+        source_method='PULP' if method=='PULP-default' else method
+        run(None,ROOT.parent/source_method,source_method,mapping,target,partitions=[split],identities=identities,
+            pu_sampling_ratio=.05 if method=='PULP-default' else None)
         original=OUTPUT/'fold_predictions'/target.name
         pd.testing.assert_frame_equal(pd.read_csv(original),pd.read_csv(target),check_exact=True)
         checks.append(dict(split=split[0],method=method,rows=len(pd.read_csv(target)),

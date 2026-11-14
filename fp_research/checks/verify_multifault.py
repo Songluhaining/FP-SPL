@@ -152,7 +152,7 @@ def main():
     for row in metrics.to_dict('records'):
         selected = [j for j in jobs if j['system']==row['system'] and j['stratum']==row['stratum']]
         chinese.append(dict(系统=NAMES[row['system']],缺陷数量层=int(row['stratum']),
-            方法={'joint':'联合贝叶斯诊断','CLAP':'有监督分类（CLAP）','PULP':'正例与未标注学习（PULP）'}[row['method']],
+            方法={'joint':'联合贝叶斯诊断','CLAP':'有监督分类（CLAP）','PULP':'正例与未标注学习（PULP，沿用等量抽样）'}[row['method']],
             实验场景='原本通过配置',版本划分='本案例独立推断' if row['method']=='joint' else '系统内同缺陷层按版本五折',
             评价子集={'all':'全部','executed':'缺陷行实际执行标签','all_base':'全部故障均在基础特征',
                       'other':'至少一个故障在其他特征','any_base':'至少一个故障在基础特征','no_base':'没有基础特征故障'}[row['subset']],
@@ -172,7 +172,7 @@ def main():
     atomic_json(OUTPUT/'verified.json',dict(versions=len(jobs),candidates=len(expected),predictions=len(frame),
         independent_labels=True,particle_risks=True,raw_inputs_unchanged=True,folds_disjoint=True,
         metrics_sha256=digest(OUTPUT/'metrics.csv'),predictions_sha256=digest(OUTPUT/'predictions.csv'),completed=now))
-    names={'joint':'联合贝叶斯诊断','CLAP':'有监督分类（CLAP）','PULP':'正例与未标注学习（PULP）'}
+    names={'joint':'联合贝叶斯诊断','CLAP':'有监督分类（CLAP）','PULP':'正例与未标注学习（PULP，沿用等量抽样）'}
     report=['# 三系统多缺陷实验报告','',
         f'本轮覆盖全部{len(jobs)}个双、三缺陷案例、{sum(j["configurations"] for j in jobs)}个配置；三种方法均以相同的{len(expected)}个原本通过配置为评价对象。以下为相对基准标签的识别结果，未做实际补测确认。','',
         '联合方法逐案例独立推断，不跨版本训练；两种比较方法在各系统、各缺陷层分别按版本五折评价。参数与阈值在读取评价标签前固定，详见[实验协议](实验协议.md)。五折结果不等同于基础变异完全未见的泛化结果。','',
@@ -182,7 +182,8 @@ def main():
             *[f'{row[k]*100:.2f}%' for k in ('precision','recall','f1','accuracy')]])+'|')
     unstable=int((frame.loc[frame.method=='joint','stable']==0).sum())
     insufficient=frame.groupby('method').score.apply(lambda s:int(s.isna().sum())).to_dict()
-    report.extend(['',f'证据不足（无法评分）的候选数：{insufficient}；联合方法采样分数差仍超过预设容差的候选数：{unstable}。缺失分数保留在分母内，按未报出计算，不赋予排序命中。',
+    insufficient_text='；'.join(f'{names[m]} {n}个' for m,n in insufficient.items())
+    report.extend(['',f'证据不足（无法评分）的候选数：{insufficient_text}；联合方法采样分数差仍超过预设容差的候选数：{unstable}。缺失分数保留在分母内，按未报出计算，不赋予排序命中。',
         '', '完整混淆矩阵、实际执行标签、基础特征子集、平均精确率和逐案例前10%检查预算命中数保存在[中文比较表](三系统多缺陷实验比较.csv)。[逐配置明细](predictions.csv)保留每个候选的分数、决策、标签及归属验证折。',
         '', '独立核验已复算后验粒子风险和评价标签，核对原始文件未改动、候选无遗漏无重复、三方法分母一致、基线训练与测试版本无交叉、实际抽样比例及所有统计。切片复用前后六个代表案例的12份基线特征表逐值一致。',
         '', '联合方法允许多个故障同时存在，但仍假设故障独立触发失败；本轮结果不证明已经建模故障之间的抑制或促进。无法区分的语句位置保留风险上下界，该范围不是95%置信区间。',

@@ -36,7 +36,8 @@ def write_csv(path, rows):
     temporary = path.with_suffix(path.suffix + f'.{os.getpid()}.tmp')
     with temporary.open('w', encoding='utf-8-sig', newline='') as stream:
         writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
-        writer.writeheader(); writer.writerows(rows)
+        writer.writeheader()
+        writer.writerows({k:None if isinstance(v,(float,np.floating)) and np.isnan(v) else v for k,v in row.items()} for row in rows)
     os.replace(temporary, path)
 
 
@@ -199,11 +200,13 @@ def labels(jobs):
     write_csv(OUTPUT / 'truth.csv', values)
 
 
-def classify(jobs, method):
+def classify(jobs, method, original_default=False):
     from threadpoolctl import threadpool_limits
     threadpool_limits(limits=1)
     import pandas as pd
     from .compare import run, load_features
+    if original_default and method!='PULP':raise ValueError('默认抽样对照仅用于PULP')
+    output_name='PULP-default' if original_default else method
     mapping = {}
     if method == 'CLAP':
         truth = pd.read_csv(OUTPUT / 'truth.csv')
@@ -212,7 +215,7 @@ def classify(jobs, method):
     # 各折即时归档，避免完成几十折之后因一折中断而丢失全部输出。
     parts = []; training_receipts = []
     for split in splits:
-        target = OUTPUT / 'fold_predictions' / f'{method}-{split[0]}.csv'
+        target = OUTPUT / 'fold_predictions' / f'{output_name}-{split[0]}.csv'
         observed = []; train_labels = []; feature_inputs = []
         for path in split[1]:
             ids, obs, table = load_features(path, method)
@@ -220,18 +223,22 @@ def classify(jobs, method):
             if method == 'CLAP': train_labels.extend(mapping[(*identities[path], cid)] for cid in ids)
             feature_inputs.append(dict(system=identities[path][0], version=identities[path][1],
                                        sha256=digest(path/method/'features.csv'), configurations=ids))
-        run(None, ROOT.parent / method, method, mapping, target, partitions=[split], identities=identities)
+        run(None, ROOT.parent / method, method, mapping, target, partitions=[split], identities=identities,
+            pu_sampling_ratio=.05 if original_default else None)
         positive=observed.count('F'); unlabeled=len(observed)-positive
-        training_receipts.append(dict(split=split[0], method=method, rows=len(observed),
+        ratio=.05 if original_default else (positive+1e-6)/unlabeled if method=='PULP' else None
+        training_receipts.append(dict(split=split[0], method=output_name, rows=len(observed),
             columns=6 if method=='CLAP' else 50, known_failure_positives=positive if method=='PULP' else None,
             training_true_positives=sum(train_labels) if method=='CLAP' else None,
-            sampling_ratio=(positive+1e-6)/unlabeled if method=='PULP' else None,
-            sampled_unlabeled_per_estimator=int(unlabeled*((positive+1e-6)/unlabeled)) if method=='PULP' else None,
+            sampling_ratio=ratio,
+            sampled_unlabeled_per_estimator=int(unlabeled*ratio) if method=='PULP' else None,
             estimators=30 if method=='PULP' else 1, seed=42 if method=='PULP' else None, input_files=feature_inputs,
             testing=[dict(system=identities[p][0],version=identities[p][1]) for p in split[2]], output_sha256=digest(target)))
-        atomic_json(OUTPUT / f'{method}-training.json', training_receipts)
+        atomic_json(OUTPUT / f'{output_name}-training.json', training_receipts)
         parts.append(pd.read_csv(target))
-    pd.concat(parts, ignore_index=True).to_csv(OUTPUT / f'{method}.csv', index=False)
+    combined=pd.concat(parts, ignore_index=True)
+    if original_default:combined['method']=output_name
+    combined.to_csv(OUTPUT / f'{output_name}.csv', index=False)
 
 
 def evaluate(jobs):
@@ -283,6 +290,7 @@ def main():
     p.add_argument('--system', choices=['elevator', 'email', 'examdb'])
     p.add_argument('--version')
     p.add_argument('--method', choices=['CLAP', 'PULP'])
+    p.add_argument('--original-default',action='store_true',help='额外运行PULP源码默认5%抽样，单独归档')
     a = p.parse_args(); jobs = manifest()
     if a.stage in {'fit', 'prepare'}:
         if a.system: jobs = [j for j in jobs if j['system'] == a.system]
@@ -309,7 +317,7 @@ def main():
     elif a.stage == 'labels': labels(jobs)
     elif a.stage == 'classify':
         if not a.method: p.error('分类需指定 --method')
-        classify(jobs, a.method)
+        classify(jobs, a.method, a.original_default)
     elif a.stage == 'evaluate': evaluate(jobs)
     else: print(json.dumps(dict(versions=len(jobs), configurations=sum(j['configurations'] for j in jobs), candidates=sum(j['candidates'] for j in jobs))))
 
