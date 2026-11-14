@@ -58,6 +58,15 @@ def log_likelihood(survival,e):
     return survival@e.passed + np.log(-np.expm1(survival))@e.failed
 
 
+def conditional_likelihood(base,execution,passed,failed,logs):
+    """仅计算依赖当前变量的项；通过证据线性汇总，失败证据保留逐行计算。"""
+    affected=(execution>0)&(failed>0)
+    failures=failed[affected]
+    local=base[:,affected]
+    passing=float(execution@passed)
+    return np.column_stack([x*passing+np.log(-np.expm1(local+x))@failures for x in logs])
+
+
 def risks(states,e,weights=None):
     active=states>0
     values=[]
@@ -132,8 +141,9 @@ def infer_joint(e,particles=256,points=9,sparsity=1.5,seed=42,sweeps=2):
         for _ in range(sweeps):
             for j in rng.permutation(g):
                 base=survival-logs[states[:,j,None]]*a[None,:,j]
-                proposed=np.column_stack([log_likelihood(base+x*a[None,:,j],e) for x in logs])
-                probabilities=softmax(beta*proposed+prior[j],axis=1)
+                conditional=conditional_likelihood(base,a[:,j],e.passed,e.failed,logs)
+                proposed=ll[:,None]+conditional-conditional[np.arange(particles),states[:,j],None]
+                probabilities=softmax(beta*conditional+prior[j],axis=1)
                 draw=(rng.random((particles,1))>np.cumsum(probabilities,axis=1)).sum(axis=1)
                 draw=np.minimum(draw,points)
                 states[:,j]=draw

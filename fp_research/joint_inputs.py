@@ -89,6 +89,10 @@ def load_evidence(version):
     present=np.array([[k in r.present for k in candidates] for r in aggregate],dtype=float)
     class_mass=np.array([mass[m].sum() for m in groups])
     membership=np.column_stack([present[:,m]@mass[m]/mass[m].sum() for m in groups])
+    # 不同求和路径可能把理论上的1算为1+2e-16；只纠正机器精度舍入。
+    if np.any(membership < -1e-12) or np.any(membership > 1+1e-12):
+        raise ValueError('配置成员概率计算越界')
+    membership=np.clip(membership,0.,1.)
     lower=np.column_stack([present[:,m].min(axis=1) for m in groups])
     upper=np.column_stack([present[:,m].max(axis=1) for m in groups])
     evidence=JointEvidence(patterns.astype(float),passed,failed,membership,lower,upper,class_mass)

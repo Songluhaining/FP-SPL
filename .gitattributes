@@ -4,3 +4,5 @@ experimental_results/新增系统逐版本运行记录.csv -text
 # 新增双系统的逐配置结果和核验凭据按原始字节归档，保留摘要可验证性。
 experimental_results/gpl_zipme/** -text
 experimental_results/multifault_pilot/** -text
+experimental_results/multifault_complete/** -text
+experimental_results/六系统单缺陷及多缺陷实验比较.csv -text

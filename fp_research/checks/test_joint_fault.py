@@ -1,10 +1,21 @@
 import unittest
 import numpy as np
 
-from fp_research.joint_fault import JointEvidence,exact,infer_joint,risks
+from fp_research.joint_fault import JointEvidence,exact,infer_joint,risks,conditional_likelihood,log_likelihood,levels
 
 
 class JointFaultTests(unittest.TestCase):
+    def test_conditional_sufficient_counts_match_full_likelihood(self):
+        rng=np.random.default_rng(91)
+        e=self.evidence()
+        e.execution=np.array([[1.,0.],[1.,1.],[0.,1.],[0.,0.]])
+        e.passed=np.array([30.,2.,50.,0.]);e.failed=np.array([4.,0.,7.,3.])
+        base=-rng.uniform(.01,4,size=(20,4));logs=np.log1p(-levels(9))
+        for j in range(2):
+            partial=conditional_likelihood(base,e.execution[:,j],e.passed,e.failed,logs)
+            full=np.column_stack([log_likelihood(base+x*e.execution[:,j],e) for x in logs])
+            np.testing.assert_allclose(partial-partial[:,0,None],full-full[:,0,None],rtol=1e-12,atol=1e-12)
+
     def evidence(self):
         return JointEvidence(np.array([[1,0],[0,1],[0,0]],dtype=float),
             np.array([1.,1.,20.]),np.array([8.,8.,0.]),
