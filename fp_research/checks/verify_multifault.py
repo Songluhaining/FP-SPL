@@ -189,6 +189,8 @@ def main():
         '', '联合方法允许多个故障同时存在，但仍假设故障独立触发失败；本轮结果不证明已经建模故障之间的抑制或促进。无法区分的语句位置保留风险上下界，该范围不是95%置信区间。',
         '', '历史六系统单缺陷结果与本轮多缺陷结果汇入仓库上一级的“六系统单缺陷及多缺陷实验比较.csv”。历史单缺陷中的“贝叶斯诊断”是此前四步版本；本轮明确标为“联合贝叶斯诊断”，没有覆盖历史分数。银行账户多缺陷仍为此前先导验证，图处理与压缩系统多缺陷按用户要求暂缓。',''])
     (OUTPUT/'实验报告.md').write_text('\n'.join(report),encoding='utf8')
+    from fp_research.multifault_presentation import publish
+    publish()
     print('独立核验通过',len(jobs),len(expected),len(frame),flush=True)
 
 

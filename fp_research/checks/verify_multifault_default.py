@@ -6,6 +6,7 @@ from fp_research.inventory import atomic_json
 from fp_research.multifault_study import ROOT,OUTPUT,KEYS,read,digest,write_csv
 from fp_research.extension_evaluate import eval_metrics
 from fp_research.result_registry import check
+from fp_research.multifault_presentation import applicability
 
 
 def main():
@@ -23,6 +24,9 @@ def main():
     original={r['split']:r for r in read(OUTPUT/'PULP-training.json')}
     receipts=read(OUTPUT/'PULP-default-training.json')
     if len(receipts)!=30:raise ValueError('默认抽样折记录不完整')
+    prereg=read(OUTPUT/'default-sampling-preregistration.json')
+    if digest(OUTPUT/'fold_predictions'/f"PULP-default-{prereg['smoke_fold']}.csv")!=prereg['smoke_sha256']:
+        raise ValueError('默认抽样与事先无真值试运行的预测不同')
     for r in receipts:
         p=original[r['split']]
         if r['input_files']!=p['input_files'] or r['testing']!=p['testing']:raise ValueError('两种抽样设置的样本不同')
@@ -53,9 +57,10 @@ def main():
                         预测明细来源=str(OUTPUT/'predictions-PULP-default.csv'),来源文件摘要=digest(OUTPUT/'predictions-PULP-default.csv'),
                         说明='额外固定的源码默认5%抽样对照；相同五折、相同特征、30个分类器、随机种子42；不根据评价结果选择抽样设置。')
         template.update({zh:m[k] for k,zh in METRICS.items()});rows.append(template)
-    write_csv(OUTPUT/'PULP默认抽样补充比较.csv',rows)
+    default_table=applicability(pd.DataFrame(rows))
+    default_table.to_csv(OUTPUT/'PULP默认抽样补充比较.csv',index=False,encoding='utf-8-sig')
     old=pd.read_csv(ROOT/'experimental_results/六系统单缺陷实验比较.csv',encoding='utf-8-sig');old.insert(1,'缺陷数量层',1)
-    pd.concat([old,table,pd.DataFrame(rows)],ignore_index=True).to_csv(ROOT/'experimental_results/六系统单缺陷及多缺陷实验比较.csv',index=False,encoding='utf-8-sig')
+    pd.concat([old,table,default_table],ignore_index=True).to_csv(ROOT/'experimental_results/六系统单缺陷及多缺陷实验比较.csv',index=False,encoding='utf-8-sig')
     report=OUTPUT/'实验报告.md';body=report.read_text(encoding='utf8').split('\n## 默认抽样补充对照')[0]
     lines=['','## 默认抽样补充对照','',
            '主表中的PULP沿用此前等量抽样设置，并非源码构造函数的默认5%。两种设置在查看评价分数前固定运行，以下同时报告，避免将参数不同的结果混为一谈。','',
@@ -64,8 +69,13 @@ def main():
     for r in metrics:
         if r['subset']!='all':continue
         previous=main_metrics[(main_metrics.system==r['system'])&(main_metrics.stratum==r['stratum'])&(main_metrics.method=='PULP')&(main_metrics.subset=='all')].iloc[0]
-        lines.append(f"|{NAMES[r['system']]}|{r['stratum']}|{previous.f1*100:.2f}%|{r['f1']*100:.2f}%|")
-    lines.extend(['','两种抽样设置的输入特征摘要、配置顺序及测试版本已逐折核对一致，变化仅为抽样比例。详细结果见[PULP默认抽样补充比较](PULP默认抽样补充比较.csv)。',''])
+        values=(f'{previous.f1*100:.2f}%',f"{r['f1']*100:.2f}%") if r['tp']+r['fn'] else ('—','—')
+        lines.append(f"|{NAMES[r['system']]}|{r['stratum']}|{values[0]}|{values[1]}|")
+    lines.extend(['','两种抽样设置的输入特征摘要、配置顺序及测试版本已逐折核对一致，变化仅为抽样比例。详细结果见[PULP默认抽样补充比较](PULP默认抽样补充比较.csv)。','',
+        '## 结果解读与重复核验','',
+        '在存在基准阳性的四个系统与缺陷数组合中，联合贝叶斯方法在三个组合的调和平均值最高；电梯三缺陷中，有监督分类与默认5%抽样的正例学习均为96.71%，高于联合方法的95.07%。该组合中联合方法误报4个、漏报24个，前两者均误报20个、漏报0个，说明减少误报伴随检出率下降，不能声称所有场景均领先。',
+        '考试数据库968个候选均无基准阳性，联合方法误报0个；等量抽样正例学习误报13个，默认5%抽样误报188个。有监督分类因训练折只有一个类别而无法评分。这里仅能比较可评分方法的误报，不能评价阳性检出能力。','',
+        '三种基线设置在每个系统、每个缺陷层各重训第一个验证折，共18次；预测与首次运行逐值一致，凭据见各方法的重复核验文件（*-repeat-check.json）。这些是确定性复现检查，不是额外独立样本或显著性检验。',''])
     report.write_text(body+'\n'.join(lines),encoding='utf8')
     atomic_json(OUTPUT/'default-verified.json',dict(candidates=len(data),folds=len(receipts),same_inputs=True,
         sampling_ratio=.05,metrics_sha256=digest(OUTPUT/'metrics-PULP-default.csv'),predictions_sha256=digest(OUTPUT/'predictions-PULP-default.csv')))

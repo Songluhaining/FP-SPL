@@ -1,0 +1,5 @@
+,VARIANT,LABEL,DDU,code_coverage,incorrectness_verifiability,correctness_reflectability,bscp,bug_involving_statements
+0,model_m_ca4_0001,TP,0.0,0.0,0.0,1.0,1.0,0.9050239072531019
+1,model_m_ca4_0003,TP,0.9008082792009624,0.0,1.0,0.749999999999996,0.0,0.0749465822432338
+2,model_m_ca4_0006,TP,0.16840518196165633,0.0,1.0,0.0,0.0,1.0
+3,model_m_ca4_0007,TP,1.0,0.0,0.0,0.4090909090909054,1.0,0.0
