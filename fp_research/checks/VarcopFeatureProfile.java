@@ -106,9 +106,24 @@ public class VarcopFeatureProfile {
         Method seeds=SliceFromStatement.class.getDeclaredMethod("getAllStatements",SDG.class);
         seeds.setAccessible(true);
         List<Statement> statements=(List<Statement>)seeds.invoke(null,sdg);
-        // 保持官方语句切片与字段传播调用不变，只复用已经核验的只读邻接。
-        SliceFromStatement.sliceFromSeedStatements(sdg,statements);
-        log("official seed slicing and field propagation finished");
+        // 官方addForward/BackwardSlicingStatements在根未执行时只初始化空集合，丢弃传入的切片。
+        // 因而保留全部根及其顺序，只跳过必然被丢弃的查询；依赖图已完整构建且仍包含全部语句。
+        boolean skip=Boolean.parseBoolean(System.getProperty("skip.unexecuted","true"));
+        List<Statement> puts=new ArrayList<>();
+        int omitted=0;
+        for(Statement statement:statements) {
+            boolean executed=StatementContainer.isStatementExecuted(statement);
+            boolean omit=skip&&!executed;
+            StatementContainer.addForwardSlicingStatements(statement,
+                omit?Collections.emptyList():Slicer.computeForwardSlice(sdg,statement));
+            StatementContainer.addBackwardSlicingStatements(statement,
+                omit?Collections.emptyList():Slicer.computeBackwardSlice(sdg,statement));
+            if(omit)omitted++;
+            SSAInstruction instruction=PDG.statement2SSAInstruction(statement.getNode().getIR().getInstructions(),statement);
+            if(instruction instanceof SSAPutInstruction && executed)puts.add(statement);
+        }
+        SliceFromStatement.slicePutAttributeStatements(puts);
+        log("seed slicing and official field propagation finished; skipped="+omitted+"/"+statements.size());
         if(sdg.enabled)sdg.verifyUnchanged();
         if(System.getProperty("export.basis")!=null)exportBasis(System.getProperty("export.basis"));
         java.nio.file.Path groups=java.nio.file.Paths.get(args[2]);

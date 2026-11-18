@@ -20,6 +20,8 @@ from .localization_study import ROOT, digest
 
 JAR = ROOT / "result/varcop_source/feature-slicing.jar"
 JAVA = Path("E:/Program Files/Java/jdk-1.8/bin")
+# 该参考实现对全部根调用官方切片与字段传播。只复用此精确源码版本的有效缓存，保留原键及摘要。
+REFERENCE_HELPER_SHA256 = "2f0208eba68998dd2c6eb4b33d3e679a07223352cb12bc0bcbe69eb017219054"
 
 
 @contextmanager
@@ -43,7 +45,7 @@ def locked(path):
             msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
 
 
-def basis_key(source):
+def basis_key(source, helper_sha256=None):
     source = Path(source)
     hashed = hashlib.sha256()
     for file in sorted(source.rglob("*.java")):
@@ -54,7 +56,7 @@ def basis_key(source):
                 if int(line.get("count", 0)) > 0}
     hashed.update(json.dumps(sorted(executed)).encode())
     hashed.update(bytes.fromhex(digest(JAR)))
-    hashed.update(bytes.fromhex(digest(ROOT / "fp_research/checks/VarcopFeatureProfile.java")))
+    hashed.update(bytes.fromhex(helper_sha256 or digest(ROOT / "fp_research/checks/VarcopFeatureProfile.java")))
     return hashed.hexdigest()
 
 
@@ -161,6 +163,12 @@ def batch(version, plans, output):
         first_log = next(iter(tasks.values()))[0]
         key = basis_key(source)
         cache = version.parent / ".fp_research/varcop-slice-cache" / key
+        reference = False
+        if not (cache / "complete.json").exists() and os.environ.get("FP_VARCOP_REFERENCE_REUSE", "1") == "1":
+            reference_key = basis_key(source, REFERENCE_HELPER_SHA256)
+            reference_cache = cache.parent / reference_key
+            if (reference_cache / "complete.json").exists():
+                key, cache, reference = reference_key, reference_cache, True
         cache.mkdir(parents=True, exist_ok=True)
         basis_path = cache / "basis.tsv.gz"
         proof = cache / "complete.json"
@@ -191,7 +199,8 @@ def batch(version, plans, output):
                                         groups_verified=len(tasks)))
             basis = read_basis(basis_path)
             data = {method: from_basis(basis, log, source) for method, (log, _) in tasks.items()}
-            atomic_json(folder / "cache.json", dict(key=key, reused=reused, basis_sha256=digest(basis_path)))
+            atomic_json(folder / "cache.json", dict(key=key, reused=reused, basis_sha256=digest(basis_path),
+                reference_helper_sha256=REFERENCE_HELPER_SHA256 if reference else None))
             for method, value in data.items():
                 atomic_json(results[method], value)
             return data
