@@ -4,12 +4,15 @@ import gzip
 import json
 from pathlib import Path
 import shutil
+import platform
+import subprocess
+import sys
 
 import numpy as np
 import pandas as pd
 
 from .inventory import atomic_json
-from .localization_study import OUTPUT, manifest, work_folder, digest, read
+from .localization_study import ROOT, OUTPUT, UPSTREAM, manifest, work_folder, inference_folder, digest, read
 
 NAMES = dict(original="未修正", joint="联合贝叶斯修正", CLAP="CLAP修正",
              PULP="PULP等量抽样修正", **{"PULP-default": "PULP默认5%修正"})
@@ -136,10 +139,36 @@ def evaluate(jobs):
     human.to_csv(OUTPUT / "语句级定位比较.csv", index=False, encoding="utf-8-sig")
     main = human[human["定位公式"] == "Ochiai"]
     main.to_csv(OUTPUT.parent / "六系统语句级缺陷定位比较.csv", index=False, encoding="utf-8-sig")
+    import scipy
+    import sklearn
+    source = {str(p.relative_to(ROOT)): digest(p) for p in (ROOT / "fp_research").rglob("*")
+              if p.is_file() and p.suffix in {".py", ".java"}}
+    runtime = dict(python=sys.version, platform=platform.platform(), numpy=np.__version__,
+                   pandas=pd.__version__, scipy=scipy.__version__, sklearn=sklearn.__version__,
+                   varcop_commit=UPSTREAM,
+                   execution_commit=subprocess.check_output(["git", "-c", "safe.directory="+ROOT.as_posix(),
+                       "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(), source_sha256=source)
+    runtime["truth_sha256"] = {str(Path(j["path"]) / (j["version"]+".mutant.log")):
+        digest(Path(j["path"]) / (j["version"]+".mutant.log")) for j in jobs}
+    atomic_json(OUTPUT / "software.json", runtime)
+    scope = pd.DataFrame(jobs).groupby(["system", "stratum"], as_index=False).agg(
+        cases=("version", "count"), configurations=("configurations", "sum"), candidates=("candidates", "sum"))
+    scope.to_csv(OUTPUT / "inventory.csv", index=False)
+    sampling = []
+    for j in jobs:
+        evidence = read(inference_folder(j) / "joint.json")
+        sampling.append(dict(system=j["system"], stratum=j["stratum"], version=j["version"],
+            particles=evidence["attempts"][-1]["particles"], stable=evidence["stable"],
+            difference=evidence["attempts"][-1]["difference"], seconds=evidence["seconds"]))
+    pd.DataFrame(sampling).to_csv(OUTPUT / "sampling.csv", index=False)
     report = [
         "# 修正假通过配置后的语句级定位结果", "",
-        f"全部{len(jobs)}个案例完成。当前联合方法按案例独立推断，各基线按系统和缺陷数进行版本五折预测。",
+        f"全部{len(jobs)}个案例、{sum(j['configurations'] for j in jobs)}个配置、{sum(j['candidates'] for j in jobs)}个原本通过配置完成。当前联合方法按案例独立推断，各基线按系统和缺陷数进行版本五折预测。",
         "修正操作排除预测为假通过的通过产品，随后重新计算VARCOP定位。主表统一使用Ochiai。",
+        "比较的是五种输入修正设置，定位算法始终为同一固定版本VARCOP；CLAP和PULP在本表中负责识别假通过配置。",
+        "PULP等量抽样与源码默认5%分别列示，不能混为同一个基线结果。所有方法使用相同案例与原始观测配置。",
+        "本轮单缺陷联合方法已重新运行，不能与历史四步方法的单缺陷分数混合；当前识别明细与统计另见fp_predictions.csv、fp_metrics.csv。",
+        "语句身份沿用基准中的特征、类和源码行标识。原始源码与测试结果未修复、未重标为失败，也未以注入位置筛选预测。",
         "所有位置采用官方最坏连续并列规则。无法进入排名的位置标为未定位，平均检查数用原始语句总数加一惩罚，检查比例计1。", "",
         "|系统|缺陷数|修正方法|案例数|故障位置数|前10定位数|平均检查数|平均检查比例|改善/相同/退化|",
         "|---|---:|---|---:|---:|---:|---:|---:|---|"]
@@ -149,7 +178,13 @@ def evaluate(jobs):
                       f"{r['改善位置数']}/{r['相同位置数']}/{r['退化位置数']}|")
     report.extend(["", "缺分的分类预测保留原始通过配置，其定位结果反映未修正这些配置的情况。",
                    "原始系统语句全集分母固定，避免删除产品改变分母造成表观改善。基础特征即可失败的案例使用官方关闭筛选的分支。",
-                   "全部定位公式及位置明细见同目录CSV。"])
+                   "全部定位公式及位置明细见同目录CSV。",
+                   f"联合推断稳定性：{sum(r['stable'] for r in sampling)}/{len(sampling)}个案例达到预先设定的双种子最大分差不超过0.05；粒子数和运行耗时逐案例保存于sampling.csv。",
+                   "未运行GPL、ZipMe的双、三缺陷案例。切片核验凭据如记录交互次数差异，该字段不参与官方定位计算；候选集合、实际分数和最坏并列名次已单独核对。",
+                   f"运行时仓库提交：{runtime['execution_commit']}；官方VARCOP提交：{UPSTREAM}。完整运行环境及实际源码摘要见software.json。"])
+    original_main = metrics[(metrics.method == "original") & (metrics.metric == "Ochiai")]
+    report.extend(["", f"未修正输入中，{int(original_main.absent_from_universe.sum())}个故障位置未出现在原始语句全集，"
+                   f"共{int(original_main.unranked.sum())}个位置无法获得定位名次。所有方法均保留这些位置与相同评价分母。"])
     (OUTPUT / "实验报告.md").write_text("\n".join(report)+"\n", encoding="utf-8")
     atomic_json(OUTPUT / "evaluated.json", dict(cases=len(jobs), rows=len(frame),
         files={p.name: digest(p) for p in (OUTPUT / "fault_positions.csv", OUTPUT / "cases.csv",
