@@ -6,3 +6,4 @@ experimental_results/gpl_zipme/** -text
 experimental_results/multifault_pilot/** -text
 experimental_results/multifault_complete/** -text
 experimental_results/六系统单缺陷及多缺陷实验比较.csv -text
+fp_research/vendor/varcop/** -text

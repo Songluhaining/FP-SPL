@@ -1,0 +1,32 @@
+{
+  "repository": "https://github.com/ttrangnguyen/VARCOP.git",
+  "commit": "62b413b52bbfba1f86a244ddb9f1daed232e329e",
+  "files": {
+    "ranking/FeaturesRankingManager.py": "cc5020d519215d52fb4087beeadf68e0c1c85206883214862c05b4a29e716da8",
+    "ranking/Keywords.py": "c56c04565337c4970e0828d680e7976b9f210ea978035811d86bac45f744eb30",
+    "ranking/MultipleBugsManager.py": "a36c66df02c550444d5b1cf0341542ad2514bef677fd9a2a48dd9808ce57e4ff",
+    "ranking/RankingManager.py": "d5d3f88853c54c2f0c17ef605d56ab58a9068ae8dd23ad8d077fa55f014ce27d",
+    "ranking/Spectrum_Expression.py": "c62feacafb7c1ba7a1094ea75edfb66a6fb3bd1393ea4f1ae4f4fd175414e072",
+    "ranking/VarBugManager.py": "8ab5083856780c52c18535329283cf7c3ad7cd69f7e42027f09601c02e74c837",
+    "ranking/VariantLevelRankingManager.py": "cef00d2f2e5b928094cc83c706ec63be8471159ba5756b5a4210d471746c5665",
+    "README.md": "7d850981d13093e9bd577e386d25aefb091ad27f369823fc94a9f8ed8f4a4d62",
+    "spc/SPCsManager.py": "b673e735880043acff046a58695ae7da4bccf875fef276a845734f35e10a9029",
+    "suspicious_statements_manager/SlicingManager.py": "70e58e43a14fdac320a58911d74734100133157fbbcd4b36c19bdf61271d9a61",
+    "suspicious_statements_manager/SuspiciousStatementManager.py": "ff96ac562bbe22fb6c16f3b0dacda9b5982adaf08c33ad97dd6f3f66b5b083f5",
+    "util/AntManager.py": "de4d10125da3b8519a75e49467f00978908562fcbf5b1c2693bd9f6b225eb165",
+    "util/ConfigManager.py": "3cfec127f3e406141c3570dab03d5768a221a4cf26f1ac28e6b23c0074279fe9",
+    "util/FileManager.py": "c29a6117743b7d00ee7d0a921095efc3e78687768db43986e75542a1b718c9df",
+    "util/Helpers.py": "0e3879910584494a740e49756a861e93302b9e1d86f11902051de35447cf924d",
+    "util/InvolvingFeatureManager.py": "533169c8a8b5967fbdd8d5577306fbefffae70e4d7fd1e5dfdc3208134e11f80",
+    "util/ModelManager.py": "67144dcfdaf7b650be353cfe01b92608c967d1e1ea457f17d74aca7db71e9be8",
+    "util/MutantManager.py": "731360442055ad6c7608fd1a711b4157ab688bfdd6c918d92b7e1d9c8e07e84d",
+    "util/SamplingManager.py": "7f9599852b0b279a46738dc36ddee70d8edaca3d74ec0ccf73ca380641e3313b",
+    "util/SpectrumCoverageManager.py": "4ef84f8bcb8b57e9346d45a32abc29efc16ab8da38313d424e1840feeee60fc7",
+    "util/TestCoverageValidator.py": "cf49b9d332aace304f64f8ba2fcb0863b5a6b543179bb9f9f19bca3d9d106b50",
+    "util/TestingCoverageManager.py": "53df73026e15141ccfda31791ac27a417d0e5c98ecad21d18c49530c66d6a03a",
+    "util/TestManager.py": "f29672b53d4c4467502aa5423c9a270684ed429a3e3525711513172068d6384f",
+    "util/VariantComposer.py": "e4e8c03fca9ee46f6f9ebaeecca42a5ad3178710aa8264d61726dba9d9e64f35"
+  },
+  "feature_slicing_jar_sha256": "887725d7a318448e17edb46da578d42db5f53fc4d01b01e2706f7486fa5d6423",
+  "note": "原版Python源码；兼容和只读适配均在外层实现。"
+}
