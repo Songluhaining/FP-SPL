@@ -1,0 +1,15 @@
+system,stratum,cases,configurations,candidates
+bank,1,73,2482,1697
+bank,2,238,8092,2552
+bank,3,72,2448,420
+elevator,1,20,360,231
+elevator,2,41,738,303
+elevator,3,61,1098,314
+email,1,36,972,505
+email,2,34,918,334
+email,3,56,1512,434
+examdb,1,49,392,323
+examdb,2,126,1008,633
+examdb,3,88,704,335
+gpl,1,105,10395,8020
+zipme,1,55,1375,689
