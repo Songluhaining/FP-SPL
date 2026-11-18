@@ -27,7 +27,8 @@ VENDOR = ROOT / "fp_research/vendor/varcop"
 
 def source_hashes():
     paths = [*VENDOR.rglob("*.py"), ROOT / "fp_research/varcop_localization.py",
-             ROOT / "fp_research/localization_study.py", ROOT / "fp_research/varcop_spcs.py"]
+             ROOT / "fp_research/localization_study.py", ROOT / "fp_research/varcop_spcs.py",
+             ROOT / "fp_research/varcop_slice.py", ROOT / "fp_research/checks/VarcopFeatureProfile.java"]
     return {str(p.relative_to(ROOT)): digest(p) for p in paths}
 
 
@@ -53,6 +54,23 @@ def input_fingerprint(version):
     return key, hashes
 
 
+@lru_cache(maxsize=1)
+def baseline_folds():
+    """使用与分类入口相同的固定版本划分，直接引用已经封存的折文件。"""
+    jobs = read(OUTPUT / "manifest.json")["jobs"]
+    result = {}
+    for system, stratum in sorted({(j["system"], j["stratum"]) for j in jobs}):
+        selected = [j for j in jobs if (j["system"], j["stratum"]) == (system, stratum)]
+        selected.sort(key=lambda j: hashlib.sha256(("42/"+system+"/"+j["version"]).encode()).digest())
+        for i, job in enumerate(selected):
+            result[(system, job["version"])] = f"{system}-{stratum}fault-fold{i % 5}"
+    return result
+
+
+def baseline_path(job, method):
+    return OUTPUT / "fold_predictions" / f"{method}-{baseline_folds()[(job['system'], job['version'])]}.csv"
+
+
 def correction_sets(job):
     version = Path(job["path"])
     with (version / "config.report.csv.done").open(encoding="utf-8-sig", newline="") as stream:
@@ -68,7 +86,9 @@ def correction_sets(job):
     references = {"joint": dict(path=str(joint_path), sha256=digest(joint_path))}
     unavailable = {}
     for name in ("CLAP", "PULP", "PULP-default"):
-        path = OUTPUT / f"{name}.csv"
+        path = baseline_path(job, name)
+        if read(path.with_suffix(".json"))["sha256"] != digest(path):
+            raise ValueError("已经封存的折外预测摘要改变")
         full = pd.read_csv(path)
         data = full[(full.system == job["system"]) & (full.version == job["version"])]
         if set(data.configuration) != passed or data.configuration.duplicated().any():
@@ -107,7 +127,7 @@ def excluded_products(ranking, products, excluded):
         ranking.list_dir = old_list
 
 
-def isolate(version, output, excluded, configs, header, spc):
+def write_spcs(version, output, excluded, configs, header, spc):
     features = header[1:-1]
     passed, failed, names = [], [], {}
     for row in configs:
@@ -125,9 +145,16 @@ def isolate(version, output, excluded, configs, header, spc):
     log = output / "spc.log"
     from .varcop_spcs import detect
     detect(features, passed, failed, names, (version / "variants").as_posix(), log)
+    return log
+
+
+def isolate(version, output, excluded, configs, header, spc):
+    """小样例参考入口，仍调用官方未加速特征切片程序。"""
+    log = write_spcs(version, output, excluded, configs, header, spc)
     sliced = output / "slicing.json"
     if log.stat().st_size:
-        command = [str(JAVA), "-Xmx512m", "-XX:+UseSerialGC",
+        command = [str(JAVA), "-Xmx2048m", "-XX:+UseSerialGC",
+                   "-XX:ActiveProcessorCount=2", "-XX:CICompilerCount=2",
                    "-Djava.io.tmpdir="+str(output),
                    "-Dspc_path="+str(log), "-Dslicing_output_path="+str(sliced),
                    "-Dcoverage_file_name=spectrum_failed_coverage.xml", "-jar", str(JAR)]
@@ -137,10 +164,14 @@ def isolate(version, output, excluded, configs, header, spc):
         raw = read(sliced)
     else:
         atomic_json(sliced, {})
-        raw = {}
+    return read_isolation(version, sliced, excluded, {r[0].strip() for r in configs})
+
+
+def read_isolation(version, sliced, excluded, names):
+    raw = read(sliced)
     data = {}
     for cid, statements in raw.items():
-        if cid not in names.values() or cid in excluded:
+        if cid not in names or cid in excluded:
             raise ValueError("特征切片出现不可用配置")
         failed_path = version / "variants" / cid / "coverage/spectrum_failed_coverage.xml"
         executed = {line.get("featureClass")+"."+line.get("featureLineNum")
@@ -161,6 +192,14 @@ def variability_case(configs, header, system):
 
 
 def rank_case(job):
+    from .varcop_slice import locked
+    output = work_folder(job) / "varcop"
+    output.mkdir(parents=True, exist_ok=True)
+    with locked(output / "rank.lock"):
+        return _rank_case(job)
+
+
+def _rank_case(job):
     version = Path(job["path"])
     output = work_folder(job) / "varcop"
     output.mkdir(parents=True, exist_ok=True)
@@ -190,16 +229,28 @@ def rank_case(job):
         is_variability = variability_case(configs, header, job["system"])
         results = {}
         identical = {}
+        plans = {}
+        aliases = {}
         for method, excluded in choices.items():
             identity = tuple(sorted(excluded))
-            if identity in identical:
-                results[method] = dict(reused=identical[identity])
+            if identity not in identical:
+                identical[identity] = method
+                target = output / method
+                target.mkdir(exist_ok=True)
+                log = write_spcs(version, target, excluded, configs, header, spc)
+                plans[method] = (log, target / "slicing.json")
+            aliases[method] = identical[identity]
+        from .varcop_slice import batch
+        batch(version, plans, output)
+        for method, excluded in choices.items():
+            if aliases[method] != method:
+                results[method] = dict(reused=aliases[method])
                 continue
-            identical[identity] = method
             folder = output / method
             folder.mkdir(exist_ok=True)
             started = time.monotonic()
-            isolated = isolate(version, folder, excluded, configs, header, spc)
+            isolated = read_isolation(version, folder / "slicing.json", excluded,
+                                      {r[0].strip() for r in configs})
             with excluded_products(ranking, products, excluded):
                 kept_all = {c: data for c, data in all_statements.items() if c not in excluded}
                 product_scores = ranking.product_based_assessment(

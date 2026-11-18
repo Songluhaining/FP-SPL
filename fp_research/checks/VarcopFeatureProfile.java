@@ -11,7 +11,7 @@ import com.ibm.wala.ipa.slicer.*;
 import com.ibm.wala.ipa.modref.ModRef;
 import com.ibm.wala.ssa.*;
 
-/** 调用原切片实现，记录各阶段耗时；可跳过最终必然丢弃的未执行根语句计算。 */
+/** 调用官方语句切片和字段传播函数，复用只读邻接并导出静态关系。 */
 public class VarcopFeatureProfile {
     static long started=System.nanoTime();
     static void log(String phase) {System.out.printf(Locale.ROOT,"%.3f %s%n",(System.nanoTime()-started)/1e9,phase);}
@@ -49,57 +49,43 @@ public class VarcopFeatureProfile {
             log("adjacency verified; hits="+hits+" cached="+(next.size()+previous.size()));
         }
     }
-    /** 原实现每次加边扫描所有根；这里维护“某语句出现在哪些根的切片里”的精确索引。 */
-    static class Indexed {
-        final HashMap<Statement,HashSet<Statement>> map;
-        final HashMap<Statement,Integer> numbers=new HashMap<>();
-        final ArrayList<Statement> roots=new ArrayList<>();
-        final HashMap<Statement,BitSet> reverse=new HashMap<>();
-        final HashMap<Statement,Boolean> executed=new HashMap<>();
-        @SuppressWarnings("unchecked") Indexed(String field) throws Exception {
-            Field f=StatementContainer.class.getDeclaredField(field);f.setAccessible(true);
-            map=(HashMap<Statement,HashSet<Statement>>)f.get(null);
-            for(Statement root:map.keySet()) {
-                int id=number(root);
-                for(Statement item:map.get(root))reverse.computeIfAbsent(item,k->new BitSet()).set(id);
-            }
-        }
-        int number(Statement root) {
-            Integer id=numbers.get(root);
-            if(id==null) {id=roots.size();roots.add(root);numbers.put(root,id);}
-            return id;
-        }
-        void add(Statement root,Collection<Statement> items,boolean filter) {
-            HashSet<Statement> values=map.computeIfAbsent(root,k->new HashSet<>());
-            int id=number(root);
-            for(Statement item:items) {
-                if(filter && !executed.computeIfAbsent(item,StatementContainer::isStatementExecuted))continue;
-                if(values.add(item))reverse.computeIfAbsent(item,k->new BitSet()).set(id);
-            }
-        }
-        void propagate(Statement root,Collection<Statement> items) {
-            map.computeIfAbsent(root,k->new HashSet<>());
-            number(root);
-            if(executed.computeIfAbsent(root,StatementContainer::isStatementExecuted))add(root,items,true);
-            BitSet related=reverse.get(root);
-            if(related!=null) {
-                BitSet snapshot=(BitSet)related.clone();
-                for(int id=snapshot.nextSetBit(0);id>=0;id=snapshot.nextSetBit(id+1))add(roots.get(id),items,false);
-            }
-        }
+    static String encode(String value) {
+        return Base64.getEncoder().encodeToString(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
-    static void propagate(List<Statement> puts) throws Exception {
-        Indexed forward=new Indexed("forwardSliceMap");
-        Indexed backward=new Indexed("backwardSliceMap");
-        HashMap<Statement,HashSet<Statement>> propagated=new HashMap<>();
-        for(Statement root:puts) {
-            HashSet<Statement> added=SliceFromStatement.slicePutStatement(root,new ArrayList<>());
-            forward.propagate(root,added);propagated.put(root,added);
+    static void exportBasis(String filename) throws Exception {
+        HashMap<String,HashSet<String>> features=StatementContainer.featureForwardInfluenceContainer();
+        HashMap<String,Statement> roots=StatementContainer.getLineKeyToForwardStatementMapping();
+        HashSet<String> keys=new HashSet<>();
+        java.io.PrintWriter out=new java.io.PrintWriter(new java.io.OutputStreamWriter(
+            new java.util.zip.GZIPOutputStream(new java.io.FileOutputStream(filename)),
+            java.nio.charset.StandardCharsets.UTF_8));
+        for(Map.Entry<String,HashSet<String>> feature:features.entrySet()) {
+            if(feature.getValue().isEmpty())out.println("Z\t"+encode(feature.getKey()));
+            for(String key:feature.getValue()) {
+                out.println("F\t"+encode(feature.getKey())+"\t"+encode(key));
+                keys.add(key);
+            }
         }
-        for(Statement root:propagated.keySet()) {
-            Set<Statement> singleton=Collections.singleton(root);
-            for(Statement item:propagated.get(root))backward.propagate(item,singleton);
+        HashSet<String> mappingKeys=new HashSet<>(keys);
+        for(String key:keys) {
+            Statement statement=roots.get(key);
+            HashSet<Statement> dependencies=StatementContainer.obtainBackwardSlicingStatements(statement);
+            if(dependencies==null) {
+                out.println("N\t"+encode(key));
+                continue;
+            }
+            for(Statement dependency:dependencies) {
+                String dep=dependency.getLineKey();
+                out.println("B\t"+encode(key)+"\t"+encode(dep));
+                mappingKeys.add(dep);
+            }
         }
+        for(String key:mappingKeys) {
+            SPLFeatureSourceLine value=MyECJJavaSourceAnalysisEngine.getFeatureLineInfo(key);
+            if(value!=null)out.println("M\t"+encode(key)+"\t"+encode(value.toString()));
+        }
+        for(String value:StatementContainer.executedFeatureLineSet)out.println("E\t"+encode(value));
+        out.close();
     }
     @SuppressWarnings({"rawtypes","unchecked"})
     public static void main(String[] args) throws Exception {
@@ -120,22 +106,11 @@ public class VarcopFeatureProfile {
         Method seeds=SliceFromStatement.class.getDeclaredMethod("getAllStatements",SDG.class);
         seeds.setAccessible(true);
         List<Statement> statements=(List<Statement>)seeds.invoke(null,sdg);
-        List<Statement> puts=new ArrayList<>();
-        boolean skip=Boolean.getBoolean("skip.unexecuted");
-        int index=0;
-        for (Statement s:statements) {
-            boolean executed=StatementContainer.isStatementExecuted(s);
-            StatementContainer.addForwardSlicingStatements(s,skip&&!executed?Collections.emptyList():Slicer.computeForwardSlice(sdg,s));
-            StatementContainer.addBackwardSlicingStatements(s,skip&&!executed?Collections.emptyList():Slicer.computeBackwardSlice(sdg,s));
-            SSAInstruction instruction=PDG.statement2SSAInstruction(s.getNode().getIR().getInstructions(),s);
-            if(instruction instanceof SSAPutInstruction && executed)puts.add(s);
-            if(++index%100==0)log("seeds "+index+"/"+statements.size());
-        }
-        log("seed slicing finished; puts="+puts.size());
+        // 保持官方语句切片与字段传播调用不变，只复用已经核验的只读邻接。
+        SliceFromStatement.sliceFromSeedStatements(sdg,statements);
+        log("official seed slicing and field propagation finished");
         if(sdg.enabled)sdg.verifyUnchanged();
-        if(Boolean.getBoolean("indexed.propagation"))propagate(puts);
-        else SliceFromStatement.slicePutAttributeStatements(puts);
-        log("field propagation");
+        if(System.getProperty("export.basis")!=null)exportBasis(System.getProperty("export.basis"));
         java.nio.file.Path groups=java.nio.file.Paths.get(args[2]);
         for(String record:java.nio.file.Files.readAllLines(groups,java.nio.charset.StandardCharsets.UTF_8)) {
             String[] pair=record.split("\\t",2);

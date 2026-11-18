@@ -8,6 +8,18 @@ import pandas as pd
 
 from fp_research import varcop_localization as v
 from fp_research.localization_study import manifest, inference_folder, work_folder, OUTPUT
+from fp_research.localization_evaluate import locate
+
+
+def assert_same_ranking(expected, actual):
+    """并列语句的文件顺序可变；核对每条分数、并列层次及最坏名次。"""
+    expected = [list(row) for row in expected]
+    actual = [list(row) for row in actual]
+    assert len(expected) == len(actual)
+    assert {r[0]: r[1:] for r in expected} == {r[0]: r[1:] for r in actual}
+    assert [r[1:] for r in expected] == [r[1:] for r in actual]
+    assert {r[0]: locate(r[0], expected) for r in expected} == {
+        r[0]: locate(r[0], actual) for r in actual}
 
 
 def check(system, stratum):
@@ -54,8 +66,8 @@ def check(system, stratum):
         ranking.global_ranking_a_suspicious_list = original_global
     assert len(captured) == 3 * len(actual)
     for i, (metric, lists) in enumerate(actual.items()):
-        assert [list(x) for x in captured[3*i]] == lists["full"], metric
-        assert [list(x) for x in captured[3*i+1]] == lists["isolated"], metric
+        assert_same_ranking(captured[3*i], lists["full"])
+        assert_same_ranking(captured[3*i+1], lists["isolated"])
     assert v.input_fingerprint(version)[0] == before
     with v.excluded_products(ranking, products, choices["exclusion-check"]):
         retained = ranking.list_dir((version / "variants").as_posix())
@@ -64,6 +76,7 @@ def check(system, stratum):
     proof = dict(system=system, stratum=stratum, version=job["version"],
                  all_six_full_rankings_identical=True, all_six_isolated_rankings_identical=True,
                  correction_exclusion_checked=True, raw_inputs_unchanged=True)
+    proof["comparison"] = "每条语句分数、并列层次和最坏名次一致；允许同一并列层内交换顺序"
     v.atomic_json(OUTPUT / f"smoke-{system}-{stratum}.json", proof)
     print(proof, flush=True)
 

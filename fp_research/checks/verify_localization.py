@@ -115,6 +115,9 @@ def main():
             raise ValueError("定位计算源码版本不一致")
         if input_fingerprint(v)[0] != receipt["protocol"]["input"]:
             raise ValueError("原始定位输入改变")
+        for reference in receipt["protocol"]["references"].values():
+            if digest(Path(reference["path"])) != reference["sha256"]:
+                raise ValueError("定位引用的原始预测改变")
         joint = inference(job)
         with (v / "config.report.csv.done").open(encoding="utf-8-sig", newline="") as stream:
             reader = csv.reader(stream)

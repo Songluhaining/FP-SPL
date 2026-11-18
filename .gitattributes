@@ -7,3 +7,11 @@ experimental_results/multifault_pilot/** -text
 experimental_results/multifault_complete/** -text
 experimental_results/六系统单缺陷及多缺陷实验比较.csv -text
 fp_research/vendor/varcop/** -text
+# 定位实验的源码摘要及结果摘要按实际字节核对。
+fp_research/*localization*.py -text
+fp_research/varcop_*.py -text
+fp_research/checks/*localization*.py -text
+fp_research/checks/test_varcop*.py -text
+fp_research/checks/VarcopFeatureProfile.java -text
+experimental_results/statement_localization/** -text
+experimental_results/六系统语句级缺陷定位比较.csv -text

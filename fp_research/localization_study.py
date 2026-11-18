@@ -57,7 +57,7 @@ def manifest():
                     additional_metrics=[m for m in METRICS if m != "Ochiai"],
                     correction="排除检测为假通过的原本通过配置；保留真实可见失败配置及其测试",
                     aggregation="AGGREGATION_ARITHMETIC_MEAN", normalization="ENABLE_NORMALIZATION",
-                    alpha=.5, coverage_filter=0.0,
+                    alpha=.5, coverage_filter=0.0, ranking_hash_seed=42,
                     methods=["original", "joint", "CLAP", "PULP", "PULP-default"],
                     joint_parameters=study.PARAMETERS, seeds=list(study.SEEDS),
                     partitions="各系统各缺陷数按版本固定五折；同一版本的配置整体留出",
@@ -65,8 +65,10 @@ def manifest():
                     note="不进行源码修复或将预测当作真实失败测试。固定全系统语句分母；漏出排名的位置保留未定位状态。",
                     deferred=["GPL-2fault", "GPL-3fault", "ZipMe-2fault", "ZipMe-3fault"])
     path = OUTPUT / "manifest.json"
-    if path.exists() and read(path) != protocol:
-        raise ValueError("实验协议已经登记，须检查差异后才能改变")
+    if path.exists():
+        if read(path) != protocol:
+            raise ValueError("实验协议已经登记，须检查差异后才能改变")
+        return jobs
     atomic_json(path, protocol)
     return jobs
 
@@ -214,6 +216,8 @@ def classify(jobs, method, original_default=False):
 
 
 def main():
+    # 固定子进程的集合遍历顺序，以复现官方SPC组合中保留的特征次序。
+    os.environ["PYTHONHASHSEED"] = "42"
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("stage", choices=["manifest", "fit", "prepare", "classify", "rank", "evaluate"])
     p.add_argument("--system")
@@ -239,6 +243,11 @@ def main():
         from .localization_evaluate import evaluate
         evaluate(jobs)
     else:
+        if args.stage == "rank":
+            from .varcop_localization import source_hashes
+            proof = read(OUTPUT / "adapters-verified.json")
+            if proof["source"] != source_hashes():
+                raise ValueError("定位适配实现改变，请先重新核对六系统代表案例")
         failures = 0
         with ProcessPoolExecutor(max_workers=args.workers) as pool:
             futures = [pool.submit(perform, j, args.stage) for j in selected]
