@@ -2,6 +2,7 @@
 from concurrent.futures import ThreadPoolExecutor
 import json
 import msvcrt
+import os
 from pathlib import Path
 import time
 
@@ -17,10 +18,6 @@ def seed_with_process_lock(version, raw_digest=None):
     cache = version.parent / ".fp_research/slice-cache"
     cache.mkdir(parents=True, exist_ok=True)
     with (cache / "localization-seed.lock").open("a+b") as stream:
-        stream.seek(0)
-        if not stream.read(1):
-            stream.write(b"0")
-            stream.flush()
         while True:
             stream.seek(0)
             try:
@@ -29,6 +26,9 @@ def seed_with_process_lock(version, raw_digest=None):
             except OSError:
                 time.sleep(.1)
         try:
+            if os.fstat(stream.fileno()).st_size == 0:
+                stream.write(b"0")
+                stream.flush()
             return original_seed(version, raw_digest)
         finally:
             stream.seek(0)

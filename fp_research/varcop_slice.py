@@ -25,10 +25,6 @@ JAVA = Path("E:/Program Files/Java/jdk-1.8/bin")
 @contextmanager
 def locked(path):
     with path.open("a+b") as stream:
-        stream.seek(0)
-        if not stream.read(1):
-            stream.write(b"0")
-            stream.flush()
         while True:
             stream.seek(0)
             try:
@@ -37,6 +33,10 @@ def locked(path):
             except OSError:
                 time.sleep(.1)
         try:
+            # Windows字节锁也禁止其他句柄读取该字节，初始化必须放在取得锁之后。
+            if os.fstat(stream.fileno()).st_size == 0:
+                stream.write(b"0")
+                stream.flush()
             yield
         finally:
             stream.seek(0)
