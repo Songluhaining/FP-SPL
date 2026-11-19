@@ -4,9 +4,25 @@ import tempfile
 import unittest
 
 from fp_research.varcop_report_relabel import write_report, load_report, use_report, write_spcs, observed_spcs
+from fp_research.varcop_score_lookup import indexed_lookup
 
 
 class ReportRelabelChecks(unittest.TestCase):
+    def test_index_preserves_first_match_missing_and_restoration(self):
+        from types import SimpleNamespace
+        def original(name, sequence):
+            for row in sequence:
+                if row[0] == name:
+                    return row[1], row[2]
+            return -1000, 0
+        ranking = SimpleNamespace(get_local_score=original, STM_NOT_FOUND=-1000)
+        sequence = [('a', .5, 1), ('b', .3, 2), ('a', .1, 3)]
+        with indexed_lookup(ranking):
+            for name in ['a', 'b', 'missing']:
+                self.assertEqual(ranking.get_local_score(name, sequence), original(name, sequence))
+            self.assertEqual(ranking.get_local_score('a', sequence), (.5, 1))
+        self.assertIs(ranking.get_local_score, original)
+
     def test_exact_last_field_replacement_and_retention(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -60,6 +76,21 @@ class ReportRelabelChecks(unittest.TestCase):
             self.assertEqual(observed_spcs(root, log, target), ['inferred'])
             self.assertEqual(target.read_text(), observed)
             self.assertEqual(log.read_text(), observed+inferred)
+
+    def test_changed_status_actually_changes_feature_combinations(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            original, corrected = root / 'config.report.csv', root / 'new/config.report.csv'
+            original.write_text('variant,Base,Optional,result\na,T,F,__PASSED__\nb,T,T,__FAILED__\nc,F,T,__PASSED__\n')
+            write_report(original, corrected, {'a'})
+            before, after = root / 'before.log', root / 'after.log'
+            write_spcs(root, original, before)
+            write_spcs(root, corrected, after)
+            combinations = lambda p: {frozenset(line.split(';', 1)[0].split(',')) for line in p.read_text().splitlines()}
+            self.assertEqual(combinations(before), {frozenset({'Base', 'Optional'})})
+            self.assertIn(frozenset({'Base'}), combinations(after))
+            self.assertNotIn(frozenset({'Base', 'Optional'}), combinations(after))
+            self.assertEqual(len(load_report(corrected)[1]), 3)
 
 
 if __name__ == '__main__':

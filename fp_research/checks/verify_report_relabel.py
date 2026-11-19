@@ -42,6 +42,11 @@ def main():
         proof = read(folder / "complete.json")
         assert proof["protocol"]["source"] == implementation.sources()
         assert proof["original_rankings_reproduced"] and proof["original_inputs_unchanged"]
+        if "runtime_optimization" in proof:
+            optimization = proof["runtime_optimization"]
+            assert optimization["every_index_checked_against_original"]
+            assert optimization["source_sha256"] == digest(implementation.ROOT / "fp_research/varcop_score_lookup.py")
+        assert implementation.legacy.input_fingerprint(version)[0] == proof["protocol"]["input"]
         for path, sha in proof["protocol"]["original_reports"].items():
             assert digest(Path(path)) == sha
         for path, sha in proof["files"].items():
@@ -57,6 +62,15 @@ def main():
             positions.add(location.rsplit(".", 1)[0]+"."+number)
         for method, info in proof["methods"].items():
             ids = set(proof["protocol"]["methods"][method])
+            if method == "original":
+                assert not ids
+            else:
+                predictions = pd.read_csv(proof["protocol"]["references"][method]["path"])
+                if method != "joint":
+                    predictions = predictions[(predictions.system == job["system"]) & (predictions.version == job["version"])]
+                passed_ids = {row[0] for row in raw[1:] if row[-1] == "__PASSED__"}
+                assert set(predictions.configuration) == passed_ids and not predictions.configuration.duplicated().any()
+                assert ids == set(predictions.loc[predictions.prediction == 1, "configuration"])
             with (folder / method / "config.report.csv").open(encoding="utf-8-sig", newline="") as stream:
                 corrected = list(csv.reader(stream))
             assert raw[0] == corrected[0] and len(raw) == len(corrected)
@@ -92,6 +106,7 @@ def main():
         target.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(folder / "complete.json", target / "complete.json")
     assert len(examined) == len(frame) == 61410
+    assert report_rows == 162470
     assert frame.groupby('method').size().nunique() == 1
     assert len(jobs) == 1054
     keys = ["system", "stratum", "version", "method", "metric", "statement"]

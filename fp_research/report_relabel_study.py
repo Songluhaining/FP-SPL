@@ -47,7 +47,17 @@ def perform(job):
     from threadpoolctl import threadpool_limits
     threadpool_limits(limits=1)
     try:
-        value = implementation.rank_case(job)
+        from .varcop_score_lookup import indexed_lookup
+        ranking, _, _ = implementation.legacy.upstream()
+        with indexed_lookup(ranking):
+            value = implementation.rank_case(job)
+        if value != "cached":
+            receipt = implementation.folder(job) / "complete.json"
+            proof = read(receipt)
+            proof["runtime_optimization"] = dict(name="indexed_readonly_local_scores",
+                source_sha256=digest(ROOT / "fp_research/varcop_score_lookup.py"),
+                every_index_checked_against_original=True)
+            atomic_json(receipt, proof)
         atomic_json(implementation.folder(job) / "status.json", dict(ok=True, value=value))
         print(job["system"], job["stratum"], job["version"], value, flush=True)
         return True
