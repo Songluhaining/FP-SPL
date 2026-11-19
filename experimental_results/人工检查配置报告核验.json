@@ -1,0 +1,43 @@
+{
+  "cases": 1054,
+  "reports": 4216,
+  "created": 4216,
+  "already_identical": 0,
+  "configurations_per_method": 32494,
+  "cases_by_system": {
+    "bank": 383,
+    "email": 126,
+    "elevator": 122,
+    "examdb": 263,
+    "gpl": 105,
+    "zipme": 55
+  },
+  "filenames": {
+    "joint": "config.report.joint.csv",
+    "CLAP": "config.report.CLAP.csv",
+    "PULP": "config.report.PULP.csv",
+    "PULP-default": "config.report.PULP-default.csv"
+  },
+  "relabeled_by_method": {
+    "joint": 4690,
+    "CLAP": 4300,
+    "PULP": 1895,
+    "PULP-default": 7504
+  },
+  "original_reports_checked": 1419,
+  "original_reports_unchanged": true,
+  "exported_reports_equal_verified_sources": true,
+  "location": "each_case_root",
+  "varcop_executed": false,
+  "baseline_config_report_overwritten": false,
+  "deferred": [
+    "GPL-2fault",
+    "GPL-3fault",
+    "ZipMe-2fault",
+    "ZipMe-3fault"
+  ],
+  "inventory_path": "E:\\Myself\\投稿\\work7\\BRFL\\experimental_results\\人工检查配置报告清单.csv",
+  "inventory_sha256": "6f16c26b44f4d41f718d5fc9d4f8c44c2a462cba29ef4865565b4271209266cc",
+  "source_result_commit": "da944f15f6668cba1c2db0a07cedd30c7e3c304d",
+  "created_at": "2026-11-19T17:45:45.944353+08:00"
+}
