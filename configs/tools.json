@@ -1,0 +1,6 @@
+{
+  "java_home": "E:/Program Files/Java/jdk-1.8",
+  "clap": "../CLAP",
+  "pulp": "../PULP",
+  "varcop_jar": "result/varcop_source/feature-slicing.jar"
+}

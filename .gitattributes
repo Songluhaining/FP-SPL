@@ -15,3 +15,32 @@ fp_research/checks/test_varcop*.py -text
 fp_research/checks/VarcopFeatureProfile.java -text
 experimental_results/statement_localization/** -text
 experimental_results/六系统语句级缺陷定位比较.csv -text
+
+# 当前分层源码与新增核验结果按实际字节保存。
+fp_research/data/** -text
+fp_research/detection/** -text
+fp_research/baselines/** -text
+fp_research/localization/** -text
+fp_research/experiments/** -text
+fp_research/evaluation/** -text
+fp_research/config.py -text
+fp_research/io.py -text
+fp_research/manual_joint.py -text
+fp_research/__main__.py -text
+tests/** -text
+tools/java/** -text
+configs/** -text
+experimental_results/localization_runs/** -text
+docs/refactor-verification.json -text
+fp_research/__init__.py -text
+
+README.md whitespace=cr-at-eol
+.gitignore whitespace=cr-at-eol
+AGENTS.md whitespace=cr-at-eol
+requirements*.txt whitespace=cr-at-eol
+fp_research/** whitespace=cr-at-eol
+configs/** whitespace=cr-at-eol
+docs/** whitespace=cr-at-eol
+tests/** whitespace=cr-at-eol
+tools/** whitespace=cr-at-eol
+experimental_results/localization_runs/** whitespace=cr-at-eol

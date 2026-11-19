@@ -1,2 +1,0 @@
-org.apache.commons.math.ode.nonstiff.EmbeddedRungeKuttaIntegrator.integrate:300
-org.apache.commons.math.ode.nonstiff.RungeKuttaIntegrator.integrate:180

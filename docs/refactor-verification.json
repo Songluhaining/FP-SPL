@@ -1,0 +1,57 @@
+{
+  "model_source_unchanged": true,
+  "bank1_14": {
+    "candidates": 26,
+    "max_score_difference": 0,
+    "posterior_states_identical": true
+  },
+  "bank2_30": {
+    "candidates": 11,
+    "max_score_difference": 0,
+    "posterior_states_identical": true
+  },
+  "CLAP_features": {
+    "rows": 26,
+    "numeric_features": 6,
+    "identical": true
+  },
+  "PULP_features": {
+    "rows": 34,
+    "numeric_features": 50,
+    "identical": true
+  },
+  "case_catalog": {
+    "cases": 1054,
+    "identical": true
+  },
+  "localization": {
+    "conditions": 5,
+    "formulas": 6,
+    "rows": 30,
+    "identical": true
+  },
+  "classifiers": {
+    "CLAP": {
+      "rows": 12,
+      "byte_identical": true
+    },
+    "PULP": {
+      "rows": 12,
+      "byte_identical": true
+    },
+    "PULP-default": {
+      "rows": 12,
+      "byte_identical": true
+    }
+  },
+  "base_commit": "758921e138c75b3882a8a085a150af856ee3c546",
+  "base_tag": "archive/pre-refactor-20261119",
+  "historical_result_files_checked": 6199,
+  "historical_results_unchanged": true,
+  "unit_tests_passed": 29,
+  "full_experiment_rerun": false,
+  "created": "2026-11-19T20:57:34.846946+08:00",
+  "current_research_python_modules": 40,
+  "previous_research_python_modules_including_checks": 123,
+  "validation_experiment": "experimental_results/localization_runs/refactor-final"
+}

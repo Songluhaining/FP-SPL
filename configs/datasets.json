@@ -1,0 +1,15 @@
+{
+  "updated": "2026-11-19",
+  "systems": {
+    "bank": "D:/dataset/whn/BankAccountTP",
+    "email": "F:/datasets/Email-FH-JML",
+    "elevator": "F:/datasets/Elevator-FH-JML",
+    "examdb": "F:/datasets/ExamDB",
+    "gpl": "D:/dataset/whn/GPL",
+    "zipme": "D:/dataset/whn/ZipMe"
+  },
+  "deferred_multifault": [
+    "gpl",
+    "zipme"
+  ]
+}
